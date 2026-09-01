@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "Ascensão",
+    "slug": "ascensao-v01",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.ascensao.app",
+      "versionCode": 1,
+      "permissions": []
+    },
+    "plugins": [
+      "expo-linear-gradient"
+    ]
+  }
+}
