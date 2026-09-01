@@ -28,8 +28,14 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Validate Expo project
+        run: npx expo-doctor
+
+      - name: Test Android bundle
+        run: npx expo export --platform android
+
       - name: Generate Android project
-        run: CI=1 npx expo prebuild --platform android
+        run: CI=1 npx expo prebuild --platform android --clean
 
       - name: Build APK
         working-directory: android
