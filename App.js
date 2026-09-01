@@ -108,7 +108,10 @@ function App() {
   useEffect(() => {
     if (!loaded) return;
 
-    AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => {});
+    AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(state)
+    ).catch(() => {});
   }, [state, loaded]);
 
   async function loadState() {
@@ -188,7 +191,10 @@ function App() {
     const title = taskTitle.trim();
 
     if (!title) {
-      Alert.alert("Task sem nome", "Digite um nome para a task.");
+      Alert.alert(
+        "Task sem nome",
+        "Digite um nome para a task."
+      );
       return;
     }
 
@@ -247,7 +253,9 @@ function App() {
           onPress: () => {
             setState((current) => ({
               ...current,
-              tasks: current.tasks.filter((item) => item.id !== task.id),
+              tasks: current.tasks.filter(
+                (item) => item.id !== task.id
+              ),
             }));
           },
         },
@@ -259,6 +267,7 @@ function App() {
     if (task.completed) return;
 
     setState((current) => ({
+      ...current,
       player: {
         ...current.player,
         xp: current.player.xp + task.xp,
@@ -272,7 +281,7 @@ function App() {
             }
           : item
       ),
-    });
+    }));
   }
 
   function renderTask(task) {
@@ -294,7 +303,11 @@ function App() {
           ]}
         >
           {task.completed && (
-            <Ionicons name="checkmark" size={17} color="#FFFFFF" />
+            <Ionicons
+              name="checkmark"
+              size={17}
+              color="#FFFFFF"
+            />
           )}
         </View>
 
@@ -303,18 +316,22 @@ function App() {
             <Text
               style={[
                 styles.taskTitle,
-                task.completed && styles.taskTitleCompleted,
+                task.completed &&
+                  styles.taskTitleCompleted,
               ]}
               numberOfLines={2}
             >
               {task.title}
             </Text>
 
-            {task.type === "special" && !task.completed && (
-              <View style={styles.specialBadge}>
-                <Text style={styles.specialBadgeText}>!</Text>
-              </View>
-            )}
+            {task.type === "special" &&
+              !task.completed && (
+                <View style={styles.specialBadge}>
+                  <Text style={styles.specialBadgeText}>
+                    !
+                  </Text>
+                </View>
+              )}
           </View>
 
           <View style={styles.taskMeta}>
@@ -322,12 +339,21 @@ function App() {
               {DIFFICULTIES[task.difficulty].label}
             </Text>
 
-            <Text style={styles.taskXP}>+{task.xp} XP</Text>
+            <Text style={styles.taskXP}>
+              +{task.xp} XP
+            </Text>
 
             {task.coins > 0 && (
               <View style={styles.coinReward}>
-                <Ionicons name="ellipse" size={9} color="#F2C94C" />
-                <Text style={styles.coinRewardText}>+{task.coins}</Text>
+                <Ionicons
+                  name="ellipse"
+                  size={9}
+                  color="#F2C94C"
+                />
+
+                <Text style={styles.coinRewardText}>
+                  +{task.coins}
+                </Text>
               </View>
             )}
           </View>
@@ -339,7 +365,11 @@ function App() {
             hitSlop={10}
             style={styles.smallAction}
           >
-            <Ionicons name="create-outline" size={17} color="#8D8AA2" />
+            <Ionicons
+              name="create-outline"
+              size={17}
+              color="#8D8AA2"
+            />
           </Pressable>
 
           <Pressable
@@ -347,7 +377,11 @@ function App() {
             hitSlop={10}
             style={styles.smallAction}
           >
-            <Ionicons name="trash-outline" size={17} color="#8D8AA2" />
+            <Ionicons
+              name="trash-outline"
+              size={17}
+              color="#8D8AA2"
+            />
           </Pressable>
         </View>
       </Pressable>
@@ -357,15 +391,23 @@ function App() {
   if (!loaded) {
     return (
       <View style={styles.loadingScreen}>
-        <Text style={styles.loadingTitle}>ASCENSÃO</Text>
-        <Text style={styles.loadingText}>Carregando seu progresso...</Text>
+        <Text style={styles.loadingTitle}>
+          ASCENSÃO
+        </Text>
+
+        <Text style={styles.loadingText}>
+          Carregando seu progresso...
+        </Text>
       </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <StatusBar barStyle="light-content" backgroundColor="#070811" />
+      <StatusBar
+        barStyle="light-content"
+        backgroundColor="#070811"
+      />
 
       <View style={styles.container}>
         <ScrollView
@@ -383,18 +425,31 @@ function App() {
                 }
               >
                 <View style={styles.avatarFrame}>
-                  <Image source={avatar} style={styles.avatar} />
+                  <Image
+                    source={avatar}
+                    style={styles.avatar}
+                  />
                 </View>
               </Pressable>
 
               <View>
-                <Text style={styles.greeting}>BEM-VINDO DE VOLTA</Text>
-                <Text style={styles.playerName}>{state.player.name}</Text>
+                <Text style={styles.greeting}>
+                  BEM-VINDO DE VOLTA
+                </Text>
+
+                <Text style={styles.playerName}>
+                  {state.player.name}
+                </Text>
               </View>
             </View>
 
             <View style={styles.coinHeader}>
-              <Ionicons name="ellipse" size={12} color="#F2C94C" />
+              <Ionicons
+                name="ellipse"
+                size={12}
+                color="#F2C94C"
+              />
+
               <Text style={styles.coinHeaderText}>
                 {state.player.coins}
               </Text>
@@ -404,14 +459,18 @@ function App() {
           <View style={styles.progressCard}>
             <View style={styles.progressTop}>
               <View>
-                <Text style={styles.sectionEyebrow}>PROGRESSÃO</Text>
+                <Text style={styles.sectionEyebrow}>
+                  PROGRESSÃO
+                </Text>
+
                 <Text style={styles.levelText}>
                   Nível {levelInfo.level}
                 </Text>
               </View>
 
               <Text style={styles.xpText}>
-                {levelInfo.currentXP} / {levelInfo.requiredXP} XP
+                {levelInfo.currentXP} /{" "}
+                {levelInfo.requiredXP} XP
               </Text>
             </View>
 
@@ -421,7 +480,9 @@ function App() {
                   styles.xpFill,
                   {
                     width: `${
-                      (levelInfo.currentXP / levelInfo.requiredXP) * 100
+                      (levelInfo.currentXP /
+                        levelInfo.requiredXP) *
+                      100
                     }%`,
                   },
                 ]}
@@ -432,25 +493,39 @@ function App() {
           <View style={styles.dailyCard}>
             <View style={styles.dailyHeader}>
               <View>
-                <Text style={styles.sectionEyebrow}>META DE HOJE</Text>
+                <Text style={styles.sectionEyebrow}>
+                  META DE HOJE
+                </Text>
+
                 <Text style={styles.dailyXP}>
-                  {completedXP} <Text style={styles.dailyXPDim}>/ 30 XP</Text>
+                  {completedXP}{" "}
+                  <Text style={styles.dailyXPDim}>
+                    / 30 XP
+                  </Text>
                 </Text>
               </View>
 
               <View
                 style={[
                   styles.targetStatus,
-                  completedXP >= 30 && styles.targetStatusComplete,
+                  completedXP >= 30 &&
+                    styles.targetStatusComplete,
                 ]}
               >
                 <Ionicons
-                  name={completedXP >= 30 ? "checkmark" : "flame"}
+                  name={
+                    completedXP >= 30
+                      ? "checkmark"
+                      : "flame"
+                  }
                   size={16}
                   color="#FFFFFF"
                 />
+
                 <Text style={styles.targetStatusText}>
-                  {completedXP >= 30 ? "CONCLUÍDA" : "EM PROGRESSO"}
+                  {completedXP >= 30
+                    ? "CONCLUÍDA"
+                    : "EM PROGRESSO"}
                 </Text>
               </View>
             </View>
@@ -463,25 +538,40 @@ function App() {
                 style={[
                   styles.dailyFill,
                   {
-                    width: `${dailyTargetProgress * 100}%`,
+                    width: `${
+                      dailyTargetProgress * 100
+                    }%`,
                   },
                 ]}
               />
             </View>
 
             <Text style={styles.dailyHint}>
-              Complete tasks para alcançar sua meta diária.
+              Complete tasks para alcançar sua meta
+              diária.
             </Text>
           </View>
 
           <View style={styles.sectionHeader}>
             <View>
-              <Text style={styles.sectionEyebrow}>HOJE</Text>
-              <Text style={styles.sectionTitle}>Suas tasks</Text>
+              <Text style={styles.sectionEyebrow}>
+                HOJE
+              </Text>
+
+              <Text style={styles.sectionTitle}>
+                Suas tasks
+              </Text>
             </View>
 
-            <Pressable onPress={openCreateTask} style={styles.addButton}>
-              <Ionicons name="add" size={22} color="#FFFFFF" />
+            <Pressable
+              onPress={openCreateTask}
+              style={styles.addButton}
+            >
+              <Ionicons
+                name="add"
+                size={22}
+                color="#FFFFFF"
+              />
             </Pressable>
           </View>
 
@@ -492,16 +582,23 @@ function App() {
                 size={32}
                 color="#7162B7"
               />
-              <Text style={styles.emptyTitle}>Nenhuma task por aqui</Text>
+
+              <Text style={styles.emptyTitle}>
+                Nenhuma task por aqui
+              </Text>
+
               <Text style={styles.emptyText}>
-                Crie sua primeira task e comece sua ascensão.
+                Crie sua primeira task e comece sua
+                ascensão.
               </Text>
 
               <Pressable
                 onPress={openCreateTask}
                 style={styles.emptyButton}
               >
-                <Text style={styles.emptyButtonText}>CRIAR TASK</Text>
+                <Text style={styles.emptyButtonText}>
+                  CRIAR TASK
+                </Text>
               </Pressable>
             </View>
           ) : (
@@ -516,15 +613,21 @@ function App() {
               size={19}
               color="#8175B5"
             />
+
             <Text style={styles.infoText}>
-              Toque numa task para concluí-la. Segure ou use o lápis para
-              editar.
+              Toque numa task para concluí-la. Segure
+              ou use o lápis para editar.
             </Text>
           </View>
         </ScrollView>
 
         <View style={styles.bottomNav}>
-          <NavItem icon="home" label="HOJE" active />
+          <NavItem
+            icon="home"
+            label="HOJE"
+            active
+          />
+
           <NavItem
             icon="flame-outline"
             label="STREAK"
@@ -535,6 +638,7 @@ function App() {
               )
             }
           />
+
           <NavItem
             icon="person-outline"
             label="PERSONAGEM"
@@ -545,6 +649,7 @@ function App() {
               )
             }
           />
+
           <NavItem
             icon="skull-outline"
             label="BOSSES"
@@ -555,6 +660,7 @@ function App() {
               )
             }
           />
+
           <NavItem
             icon="storefront-outline"
             label="LOJA"
@@ -576,7 +682,11 @@ function App() {
       >
         <KeyboardAvoidingView
           style={styles.modalBackdrop}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+          behavior={
+            Platform.OS === "ios"
+              ? "padding"
+              : undefined
+          }
         >
           <Pressable
             style={styles.modalDismissArea}
@@ -589,8 +699,11 @@ function App() {
                 <Text style={styles.sectionEyebrow}>
                   {editingTask ? "EDITAR" : "NOVA"}
                 </Text>
+
                 <Text style={styles.modalTitle}>
-                  {editingTask ? "Editar task" : "Criar task"}
+                  {editingTask
+                    ? "Editar task"
+                    : "Criar task"}
                 </Text>
               </View>
 
@@ -598,11 +711,17 @@ function App() {
                 onPress={closeTaskModal}
                 style={styles.modalClose}
               >
-                <Ionicons name="close" size={22} color="#AAA7BA" />
+                <Ionicons
+                  name="close"
+                  size={22}
+                  color="#AAA7BA"
+                />
               </Pressable>
             </View>
 
-            <Text style={styles.inputLabel}>NOME DA TASK</Text>
+            <Text style={styles.inputLabel}>
+              NOME DA TASK
+            </Text>
 
             <TextInput
               value={taskTitle}
@@ -614,62 +733,80 @@ function App() {
               maxLength={70}
             />
 
-            <Text style={styles.inputLabel}>TIPO</Text>
+            <Text style={styles.inputLabel}>
+              TIPO
+            </Text>
 
             <View style={styles.optionRow}>
               <OptionButton
                 label="DIÁRIA"
                 active={taskType === "daily"}
-                onPress={() => setTaskType("daily")}
+                onPress={() =>
+                  setTaskType("daily")
+                }
               />
 
               <OptionButton
                 label="ESPECIAL"
                 active={taskType === "special"}
-                onPress={() => setTaskType("special")}
+                onPress={() =>
+                  setTaskType("special")
+                }
               />
             </View>
 
-            <Text style={styles.inputLabel}>DIFICULDADE</Text>
+            <Text style={styles.inputLabel}>
+              DIFICULDADE
+            </Text>
 
             <View style={styles.difficultyGrid}>
-              {Object.entries(DIFFICULTIES).map(([key, value]) => (
-                <Pressable
-                  key={key}
-                  onPress={() => setDifficulty(key)}
-                  style={[
-                    styles.difficultyButton,
-                    difficulty === key && styles.difficultyButtonActive,
-                  ]}
-                >
-                  <Text
+              {Object.entries(DIFFICULTIES).map(
+                ([key, value]) => (
+                  <Pressable
+                    key={key}
+                    onPress={() =>
+                      setDifficulty(key)
+                    }
                     style={[
-                      styles.difficultyName,
+                      styles.difficultyButton,
                       difficulty === key &&
-                        styles.difficultyNameActive,
+                        styles.difficultyButtonActive,
                     ]}
                   >
-                    {value.label}
-                  </Text>
+                    <Text
+                      style={[
+                        styles.difficultyName,
+                        difficulty === key &&
+                          styles.difficultyNameActive,
+                      ]}
+                    >
+                      {value.label}
+                    </Text>
 
-                  <Text
-                    style={[
-                      styles.difficultyReward,
-                      difficulty === key &&
-                        styles.difficultyRewardActive,
-                    ]}
-                  >
-                    +{value.xp} XP • {value.coins} 🪙
-                  </Text>
-                </Pressable>
-              ))}
+                    <Text
+                      style={[
+                        styles.difficultyReward,
+                        difficulty === key &&
+                          styles.difficultyRewardActive,
+                      ]}
+                    >
+                      +{value.xp} XP •{" "}
+                      {value.coins} 🪙
+                    </Text>
+                  </Pressable>
+                )
+              )}
             </View>
 
             <Text style={styles.systemNote}>
-              O sistema define automaticamente a recompensa.
+              O sistema define automaticamente a
+              recompensa.
             </Text>
 
-            <Pressable onPress={saveTask} style={styles.saveButton}>
+            <Pressable
+              onPress={saveTask}
+              style={styles.saveButton}
+            >
               <LinearGradient
                 colors={["#6548F5", "#8B63FF"]}
                 start={{ x: 0, y: 0 }}
@@ -677,7 +814,9 @@ function App() {
                 style={styles.saveButtonGradient}
               >
                 <Text style={styles.saveButtonText}>
-                  {editingTask ? "SALVAR ALTERAÇÕES" : "CRIAR TASK"}
+                  {editingTask
+                    ? "SALVAR ALTERAÇÕES"
+                    : "CRIAR TASK"}
                 </Text>
               </LinearGradient>
             </Pressable>
@@ -688,31 +827,55 @@ function App() {
   );
 }
 
-function NavItem({ icon, label, active, onPress }) {
+function NavItem({
+  icon,
+  label,
+  active,
+  onPress,
+}) {
   return (
-    <Pressable onPress={onPress} style={styles.navItem}>
+    <Pressable
+      onPress={onPress}
+      style={styles.navItem}
+    >
       <Ionicons
         name={icon}
         size={21}
-        color={active ? "#9876FF" : "#656273"}
+        color={
+          active ? "#9876FF" : "#656273"
+        }
       />
-      <Text style={[styles.navLabel, active && styles.navLabelActive]}>
+
+      <Text
+        style={[
+          styles.navLabel,
+          active && styles.navLabelActive,
+        ]}
+      >
         {label}
       </Text>
     </Pressable>
   );
 }
 
-function OptionButton({ label, active, onPress }) {
+function OptionButton({
+  label,
+  active,
+  onPress,
+}) {
   return (
     <Pressable
       onPress={onPress}
-      style={[styles.optionButton, active && styles.optionButtonActive]}
+      style={[
+        styles.optionButton,
+        active && styles.optionButtonActive,
+      ]}
     >
       <Text
         style={[
           styles.optionButtonText,
-          active && styles.optionButtonTextActive,
+          active &&
+            styles.optionButtonTextActive,
         ]}
       >
         {label}
@@ -1186,7 +1349,8 @@ const styles = StyleSheet.create({
     borderColor: "#29283A",
     paddingHorizontal: 19,
     paddingTop: 19,
-    paddingBottom: Platform.OS === "ios" ? 30 : 18,
+    paddingBottom:
+      Platform.OS === "ios" ? 30 : 18,
   },
 
   modalHeader: {
