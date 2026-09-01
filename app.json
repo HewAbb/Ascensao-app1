@@ -10,9 +10,7 @@
       "package": "com.ascensao.app",
       "versionCode": 1,
       "permissions": []
-    },
-    "plugins": [
-      "expo-linear-gradient"
+    }
     ]
   }
 }
