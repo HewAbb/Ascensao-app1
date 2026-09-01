@@ -11,7 +11,8 @@
       "versionCode": 1,
       "permissions": []
     },
-    
-
+    "plugins": [
+      "expo-linear-gradient"
+    ]
   }
 }
