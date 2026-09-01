@@ -13,6 +13,6 @@
     },
     "plugins": [
       "expo-linear-gradient"
-    ]
+    
   }
 }
