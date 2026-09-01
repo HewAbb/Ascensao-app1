@@ -1,0 +1,70 @@
+name: Extract Expo project
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  extract:
+    if: "!contains(github.event.head_commit.message, 'Extract Expo project')"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project
+        shell: bash
+        run: |
+          set -e
+
+          ZIP=$(find . -maxdepth 1 -type f -name "Ascensao*.zip" | head -n 1)
+
+          if [ -z "$ZIP" ]; then
+            echo "ERRO: arquivo ZIP do projeto não encontrado."
+            exit 1
+          fi
+
+          echo "ZIP encontrado: $ZIP"
+
+          rm -rf extracted
+          mkdir -p extracted
+
+          unzip -q "$ZIP" -d extracted
+
+          PROJECT_DIR=$(find extracted -name package.json -type f -print -quit | xargs -r dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "ERRO: package.json não encontrado dentro do ZIP."
+            exit 1
+          fi
+
+          echo "Projeto encontrado em: $PROJECT_DIR"
+
+          rm -rf "$PROJECT_DIR/.github"
+
+          cp -R "$PROJECT_DIR"/. .
+
+          test -f package.json
+
+          echo "Projeto extraído com sucesso."
+
+      - name: Commit project files
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "Nenhuma alteração para salvar."
+            exit 0
+          fi
+
+          git commit -m "Extract Expo project"
+          git push
