@@ -90,21 +90,157 @@ function calculateLevel(xp) {
   };
 }
 
+/*
+  Atualiza as tasks para o dia atual.
+
+  REGRAS:
+
+  DIÁRIAS
+  - Renovam automaticamente a cada novo dia.
+  - Se concluídas ontem, voltam hoje como não concluídas.
+  - Se não concluídas ontem, são perdidas e começam
+    novamente hoje.
+  - A recompensa pode ser conquistada novamente hoje.
+
+  ESPECIAIS
+  - Se não concluídas, permanecem disponíveis.
+  - Se concluídas hoje, continuam visíveis durante o dia.
+  - Se concluídas em um dia anterior, desaparecem.
+*/
+function refreshTasksForDate(tasks, today) {
+  return tasks.reduce((result, task) => {
+    // ==========================================
+    // TASK DIÁRIA
+    // ==========================================
+    if (task.type === "daily") {
+      if (task.date !== today) {
+        result.push({
+          ...task,
+          date: today,
+          completed: false,
+          completedAt: null,
+          awardedXP: 0,
+          awardedCoins: 0,
+        });
+      } else {
+        result.push({
+          ...task,
+          completedAt:
+            task.completedAt ||
+            (task.completed ? today : null),
+
+          awardedXP:
+            typeof task.awardedXP === "number"
+              ? task.awardedXP
+              : task.completed
+              ? task.xp
+              : 0,
+
+          awardedCoins:
+            typeof task.awardedCoins === "number"
+              ? task.awardedCoins
+              : task.completed
+              ? task.coins
+              : 0,
+        });
+      }
+
+      return result;
+    }
+
+    // ==========================================
+    // TASK ESPECIAL
+    // ==========================================
+    if (task.type === "special") {
+      const completedAt =
+        task.completedAt ||
+        (task.completed ? task.date : null);
+
+      // Especial concluída em dia anterior:
+      // desaparece.
+      if (
+        task.completed &&
+        completedAt &&
+        completedAt !== today
+      ) {
+        return result;
+      }
+
+      // Especial pendente ou concluída hoje:
+      // continua disponível.
+      result.push({
+        ...task,
+        completedAt,
+
+        awardedXP:
+          typeof task.awardedXP === "number"
+            ? task.awardedXP
+            : task.completed
+            ? task.xp
+            : 0,
+
+        awardedCoins:
+          typeof task.awardedCoins === "number"
+            ? task.awardedCoins
+            : task.completed
+            ? task.coins
+            : 0,
+      });
+
+      return result;
+    }
+
+    return result;
+  }, []);
+}
+
 function App() {
   const [state, setState] = useState(initialState);
   const [loaded, setLoaded] = useState(false);
 
-  const [taskModalVisible, setTaskModalVisible] = useState(false);
-  const [editingTask, setEditingTask] = useState(null);
+  const [today, setToday] = useState(getTodayKey());
 
-  const [taskTitle, setTaskTitle] = useState("");
-  const [taskType, setTaskType] = useState("daily");
-  const [difficulty, setDifficulty] = useState("simples");
+  const [taskModalVisible, setTaskModalVisible] =
+    useState(false);
 
+  const [editingTask, setEditingTask] =
+    useState(null);
+
+  const [taskTitle, setTaskTitle] =
+    useState("");
+
+  const [taskType, setTaskType] =
+    useState("daily");
+
+  const [difficulty, setDifficulty] =
+    useState("simples");
+
+  /*
+    Verifica se o dia mudou enquanto o app
+    permanece aberto.
+  */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const currentDay = getTodayKey();
+
+      if (currentDay !== today) {
+        setToday(currentDay);
+      }
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, [today]);
+
+  /*
+    Carrega o estado salvo.
+  */
   useEffect(() => {
     loadState();
   }, []);
 
+  /*
+    Salva o estado sempre que ele muda.
+  */
   useEffect(() => {
     if (!loaded) return;
 
@@ -114,9 +250,27 @@ function App() {
     ).catch(() => {});
   }, [state, loaded]);
 
+  /*
+    Atualiza as tasks quando o dia muda.
+  */
+  useEffect(() => {
+    if (!loaded) return;
+
+    setState((current) => ({
+      ...current,
+      tasks: refreshTasksForDate(
+        current.tasks,
+        today
+      ),
+    }));
+  }, [today, loaded]);
+
   async function loadState() {
     try {
-      const saved = await AsyncStorage.getItem(STORAGE_KEY);
+      const saved =
+        await AsyncStorage.getItem(
+          STORAGE_KEY
+        );
 
       if (!saved) {
         setLoaded(true);
@@ -124,46 +278,80 @@ function App() {
       }
 
       const parsed = JSON.parse(saved);
-      const today = getTodayKey();
 
-      const cleanedTasks = (parsed.tasks || []).filter((task) => {
-        if (task.type === "special") {
-          return true;
-        }
+      const currentDay = getTodayKey();
 
-        return task.date === today;
-      });
+      const updatedTasks =
+        refreshTasksForDate(
+          parsed.tasks || [],
+          currentDay
+        );
 
       setState({
         ...initialState,
         ...parsed,
-        tasks: cleanedTasks,
+
+        player: {
+          ...initialState.player,
+          ...(parsed.player || {}),
+        },
+
+        tasks: updatedTasks,
       });
     } catch (error) {
-      console.log("Erro ao carregar dados:", error);
+      console.log(
+        "Erro ao carregar dados:",
+        error
+      );
     } finally {
       setLoaded(true);
     }
   }
 
-  const today = getTodayKey();
-
+  /*
+    Tasks que aparecem na Home hoje.
+  */
   const todayTasks = useMemo(() => {
     return state.tasks.filter((task) => {
-      if (task.type === "special") return true;
+      if (task.type === "special") {
+        return true;
+      }
+
       return task.date === today;
     });
   }, [state.tasks, today]);
 
+  /*
+    IMPORTANTE:
+
+    A Meta de Hoje NÃO possui um contador separado.
+
+    Ela é calculada diretamente pelas tasks concluídas.
+
+    Portanto:
+
+    15 XP concluídos = 15/30
+    desfazer       = 0/30
+    excluir        = 0/30
+
+    Isso evita inconsistências.
+  */
   const completedXP = useMemo(() => {
     return todayTasks
       .filter((task) => task.completed)
-      .reduce((total, task) => total + task.xp, 0);
+      .reduce(
+        (total, task) =>
+          total + task.xp,
+        0
+      );
   }, [todayTasks]);
 
-  const dailyTargetProgress = Math.min(completedXP / 30, 1);
+  const dailyTargetProgress =
+    Math.min(completedXP / 30, 1);
 
-  const levelInfo = calculateLevel(state.player.xp);
+  const levelInfo = calculateLevel(
+    state.player.xp
+  );
 
   function openCreateTask() {
     setEditingTask(null);
@@ -195,49 +383,128 @@ function App() {
         "Task sem nome",
         "Digite um nome para a task."
       );
+
       return;
     }
 
-    const reward = DIFFICULTIES[difficulty];
+    const reward =
+      DIFFICULTIES[difficulty];
 
     if (editingTask) {
       setState((current) => ({
         ...current,
-        tasks: current.tasks.map((task) =>
-          task.id === editingTask.id
-            ? {
-                ...task,
-                title,
-                type: taskType,
-                difficulty,
-                xp: reward.xp,
-                coins: reward.coins,
-              }
-            : task
+
+        tasks: current.tasks.map(
+          (task) => {
+            if (
+              task.id !==
+              editingTask.id
+            ) {
+              return task;
+            }
+
+            const isCompleted =
+              task.completed;
+
+            return {
+              ...task,
+
+              title,
+
+              type: taskType,
+
+              difficulty,
+
+              xp: reward.xp,
+
+              coins: reward.coins,
+
+              completed:
+                isCompleted,
+
+              completedAt:
+                isCompleted
+                  ? task.completedAt ||
+                    today
+                  : null,
+
+              /*
+                Mantemos a recompensa
+                que realmente foi dada.
+              */
+              awardedXP:
+                isCompleted
+                  ? typeof task.awardedXP ===
+                    "number"
+                    ? task.awardedXP
+                    : task.xp
+                  : 0,
+
+              awardedCoins:
+                isCompleted
+                  ? typeof task.awardedCoins ===
+                    "number"
+                    ? task.awardedCoins
+                    : task.coins
+                  : 0,
+
+              date:
+                taskType ===
+                "daily"
+                  ? today
+                  : task.date,
+            };
+          }
         ),
       }));
     } else {
       const newTask = {
         id: createId(),
+
         title,
+
         type: taskType,
+
         difficulty,
+
         xp: reward.xp,
+
         coins: reward.coins,
+
         completed: false,
+
+        completedAt: null,
+
+        awardedXP: 0,
+
+        awardedCoins: 0,
+
         date: today,
-        createdAt: new Date().toISOString(),
+
+        createdAt:
+          new Date().toISOString(),
       };
 
       setState((current) => ({
         ...current,
-        tasks: [newTask, ...current.tasks],
+
+        tasks: [
+          newTask,
+          ...current.tasks,
+        ],
       }));
     }
 
     closeTaskModal();
   }
 
+  /*
+    Exclui uma task.
+
+    Se ela estava concluída,
+    removemos também exatamente
+    as recompensas que ela concedeu.
+  */
   function deleteTask(task) {
     Alert.alert(
       "Excluir task",
@@ -247,59 +514,219 @@ function App() {
           text: "Cancelar",
           style: "cancel",
         },
+
         {
           text: "Excluir",
           style: "destructive",
+
           onPress: () => {
-            setState((current) => ({
-              ...current,
-              tasks: current.tasks.filter(
-                (item) => item.id !== task.id
-              ),
-            }));
+            setState((current) => {
+              const awardedXP =
+                task.completed
+                  ? typeof task.awardedXP ===
+                    "number"
+                    ? task.awardedXP
+                    : task.xp
+                  : 0;
+
+              const awardedCoins =
+                task.completed
+                  ? typeof task.awardedCoins ===
+                    "number"
+                    ? task.awardedCoins
+                    : task.coins
+                  : 0;
+
+              return {
+                ...current,
+
+                player: {
+                  ...current.player,
+
+                  xp: Math.max(
+                    0,
+                    current.player.xp -
+                      awardedXP
+                  ),
+
+                  coins: Math.max(
+                    0,
+                    current.player.coins -
+                      awardedCoins
+                  ),
+                },
+
+                tasks:
+                  current.tasks.filter(
+                    (item) =>
+                      item.id !==
+                      task.id
+                  ),
+              };
+            });
           },
         },
       ]
     );
   }
 
-  function completeTask(task) {
-    if (task.completed) return;
+  /*
+    CONCLUIR / DESFAZER TASK
 
-    setState((current) => ({
-      ...current,
-      player: {
-        ...current.player,
-        xp: current.player.xp + task.xp,
-        coins: current.player.coins + task.coins,
-      },
-      tasks: current.tasks.map((item) =>
-        item.id === task.id
-          ? {
-              ...item,
-              completed: true,
-            }
-          : item
-      ),
-    }));
+    Pendente → Concluída
+      + XP
+      + moedas
+      + XP da Meta de Hoje
+
+    Concluída → Pendente
+      - XP
+      - moedas
+      - XP da Meta de Hoje
+
+    A Meta de Hoje é recalculada automaticamente
+    com base em todayTasks.
+  */
+  function toggleTask(task) {
+    setState((current) => {
+      const currentTask =
+        current.tasks.find(
+          (item) =>
+            item.id === task.id
+        );
+
+      if (!currentTask) {
+        return current;
+      }
+
+      const wasCompleted =
+        currentTask.completed;
+
+      const awardedXP =
+        typeof currentTask.awardedXP ===
+        "number"
+          ? currentTask.awardedXP
+          : currentTask.xp;
+
+      const awardedCoins =
+        typeof currentTask.awardedCoins ===
+        "number"
+          ? currentTask.awardedCoins
+          : currentTask.coins;
+
+      // ==========================================
+      // DESFAZER
+      // ==========================================
+      if (wasCompleted) {
+        return {
+          ...current,
+
+          player: {
+            ...current.player,
+
+            xp: Math.max(
+              0,
+              current.player.xp -
+                awardedXP
+            ),
+
+            coins: Math.max(
+              0,
+              current.player.coins -
+                awardedCoins
+            ),
+          },
+
+          tasks:
+            current.tasks.map(
+              (item) =>
+                item.id ===
+                currentTask.id
+                  ? {
+                      ...item,
+
+                      completed: false,
+
+                      completedAt:
+                        null,
+
+                      awardedXP: 0,
+
+                      awardedCoins: 0,
+                    }
+                  : item
+            ),
+        };
+      }
+
+      // ==========================================
+      // CONCLUIR
+      // ==========================================
+      return {
+        ...current,
+
+        player: {
+          ...current.player,
+
+          xp:
+            current.player.xp +
+            currentTask.xp,
+
+          coins:
+            current.player.coins +
+            currentTask.coins,
+        },
+
+        tasks:
+          current.tasks.map(
+            (item) =>
+              item.id ===
+              currentTask.id
+                ? {
+                    ...item,
+
+                    completed: true,
+
+                    completedAt:
+                      today,
+
+                    awardedXP:
+                      currentTask.xp,
+
+                    awardedCoins:
+                      currentTask.coins,
+                  }
+                : item
+          ),
+      };
+    });
   }
 
   function renderTask(task) {
     return (
       <Pressable
         key={task.id}
-        onPress={() => completeTask(task)}
-        onLongPress={() => openEditTask(task)}
+        onPress={() =>
+          toggleTask(task)
+        }
+        onLongPress={() =>
+          openEditTask(task)
+        }
         style={({ pressed }) => [
           styles.taskCard,
-          pressed && styles.pressed,
-          task.completed && styles.taskCompleted,
+
+          pressed &&
+            styles.pressed,
+
+          task.completed &&
+            styles.taskCompleted,
         ]}
       >
         <View
           style={[
             styles.taskCheck,
-            task.completed && styles.taskCheckCompleted,
+
+            task.completed &&
+              styles.taskCheckCompleted,
           ]}
         >
           {task.completed && (
@@ -311,11 +738,16 @@ function App() {
           )}
         </View>
 
-        <View style={styles.taskContent}>
-          <View style={styles.taskTitleRow}>
+        <View
+          style={styles.taskContent}
+        >
+          <View
+            style={styles.taskTitleRow}
+          >
             <Text
               style={[
                 styles.taskTitle,
+
                 task.completed &&
                   styles.taskTitleCompleted,
               ]}
@@ -324,34 +756,63 @@ function App() {
               {task.title}
             </Text>
 
-            {task.type === "special" &&
+            {task.type ===
+              "special" &&
               !task.completed && (
-                <View style={styles.specialBadge}>
-                  <Text style={styles.specialBadgeText}>
+                <View
+                  style={
+                    styles.specialBadge
+                  }
+                >
+                  <Text
+                    style={
+                      styles.specialBadgeText
+                    }
+                  >
                     !
                   </Text>
                 </View>
               )}
           </View>
 
-          <View style={styles.taskMeta}>
-            <Text style={styles.taskDifficulty}>
-              {DIFFICULTIES[task.difficulty].label}
+          <View
+            style={styles.taskMeta}
+          >
+            <Text
+              style={
+                styles.taskDifficulty
+              }
+            >
+              {
+                DIFFICULTIES[
+                  task.difficulty
+                ].label
+              }
             </Text>
 
-            <Text style={styles.taskXP}>
+            <Text
+              style={styles.taskXP}
+            >
               +{task.xp} XP
             </Text>
 
             {task.coins > 0 && (
-              <View style={styles.coinReward}>
+              <View
+                style={
+                  styles.coinReward
+                }
+              >
                 <Ionicons
                   name="ellipse"
                   size={9}
                   color="#F2C94C"
                 />
 
-                <Text style={styles.coinRewardText}>
+                <Text
+                  style={
+                    styles.coinRewardText
+                  }
+                >
                   +{task.coins}
                 </Text>
               </View>
@@ -359,11 +820,17 @@ function App() {
           </View>
         </View>
 
-        <View style={styles.taskActions}>
+        <View
+          style={styles.taskActions}
+        >
           <Pressable
-            onPress={() => openEditTask(task)}
+            onPress={() =>
+              openEditTask(task)
+            }
             hitSlop={10}
-            style={styles.smallAction}
+            style={
+              styles.smallAction
+            }
           >
             <Ionicons
               name="create-outline"
@@ -373,9 +840,13 @@ function App() {
           </Pressable>
 
           <Pressable
-            onPress={() => deleteTask(task)}
+            onPress={() =>
+              deleteTask(task)
+            }
             hitSlop={10}
-            style={styles.smallAction}
+            style={
+              styles.smallAction
+            }
           >
             <Ionicons
               name="trash-outline"
@@ -390,12 +861,20 @@ function App() {
 
   if (!loaded) {
     return (
-      <View style={styles.loadingScreen}>
-        <Text style={styles.loadingTitle}>
+      <View
+        style={
+          styles.loadingScreen
+        }
+      >
+        <Text
+          style={styles.loadingTitle}
+        >
           ASCENSÃO
         </Text>
 
-        <Text style={styles.loadingText}>
+        <Text
+          style={styles.loadingText}
+        >
           Carregando seu progresso...
         </Text>
       </View>
@@ -403,19 +882,31 @@ function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView
+      style={styles.safeArea}
+    >
       <StatusBar
         barStyle="light-content"
         backgroundColor="#070811"
       />
 
-      <View style={styles.container}>
+      <View
+        style={styles.container}
+      >
         <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={
+            false
+          }
+          contentContainerStyle={
+            styles.scrollContent
+          }
         >
-          <View style={styles.header}>
-            <View style={styles.profileArea}>
+          <View
+            style={styles.header}
+          >
+            <View
+              style={styles.profileArea}
+            >
               <Pressable
                 onPress={() =>
                   Alert.alert(
@@ -424,57 +915,114 @@ function App() {
                   )
                 }
               >
-                <View style={styles.avatarFrame}>
+                <View
+                  style={
+                    styles.avatarFrame
+                  }
+                >
                   <Image
                     source={avatar}
-                    style={styles.avatar}
+                    style={
+                      styles.avatar
+                    }
                   />
                 </View>
               </Pressable>
 
               <View>
-                <Text style={styles.greeting}>
+                <Text
+                  style={
+                    styles.greeting
+                  }
+                >
                   BEM-VINDO DE VOLTA
                 </Text>
 
-                <Text style={styles.playerName}>
-                  {state.player.name}
+                <Text
+                  style={
+                    styles.playerName
+                  }
+                >
+                  {
+                    state.player
+                      .name
+                  }
                 </Text>
               </View>
             </View>
 
-            <View style={styles.coinHeader}>
+            <View
+              style={
+                styles.coinHeader
+              }
+            >
               <Ionicons
                 name="ellipse"
                 size={12}
                 color="#F2C94C"
               />
 
-              <Text style={styles.coinHeaderText}>
-                {state.player.coins}
+              <Text
+                style={
+                  styles.coinHeaderText
+                }
+              >
+                {
+                  state.player
+                    .coins
+                }
               </Text>
             </View>
           </View>
 
-          <View style={styles.progressCard}>
-            <View style={styles.progressTop}>
+          <View
+            style={
+              styles.progressCard
+            }
+          >
+            <View
+              style={
+                styles.progressTop
+              }
+            >
               <View>
-                <Text style={styles.sectionEyebrow}>
+                <Text
+                  style={
+                    styles.sectionEyebrow
+                  }
+                >
                   PROGRESSÃO
                 </Text>
 
-                <Text style={styles.levelText}>
-                  Nível {levelInfo.level}
+                <Text
+                  style={
+                    styles.levelText
+                  }
+                >
+                  Nível{" "}
+                  {levelInfo.level}
                 </Text>
               </View>
 
-              <Text style={styles.xpText}>
-                {levelInfo.currentXP} /{" "}
-                {levelInfo.requiredXP} XP
+              <Text
+                style={
+                  styles.xpText
+                }
+              >
+                {
+                  levelInfo.currentXP
+                }{" "}
+                /{" "}
+                {
+                  levelInfo.requiredXP
+                }{" "}
+                XP
               </Text>
             </View>
 
-            <View style={styles.xpBar}>
+            <View
+              style={styles.xpBar}
+            >
               <View
                 style={[
                   styles.xpFill,
@@ -490,16 +1038,34 @@ function App() {
             </View>
           </View>
 
-          <View style={styles.dailyCard}>
-            <View style={styles.dailyHeader}>
+          <View
+            style={styles.dailyCard}
+          >
+            <View
+              style={
+                styles.dailyHeader
+              }
+            >
               <View>
-                <Text style={styles.sectionEyebrow}>
+                <Text
+                  style={
+                    styles.sectionEyebrow
+                  }
+                >
                   META DE HOJE
                 </Text>
 
-                <Text style={styles.dailyXP}>
+                <Text
+                  style={
+                    styles.dailyXP
+                  }
+                >
                   {completedXP}{" "}
-                  <Text style={styles.dailyXPDim}>
+                  <Text
+                    style={
+                      styles.dailyXPDim
+                    }
+                  >
                     / 30 XP
                   </Text>
                 </Text>
@@ -508,6 +1074,7 @@ function App() {
               <View
                 style={[
                   styles.targetStatus,
+
                   completedXP >= 30 &&
                     styles.targetStatusComplete,
                 ]}
@@ -522,50 +1089,90 @@ function App() {
                   color="#FFFFFF"
                 />
 
-                <Text style={styles.targetStatusText}>
-                  {completedXP >= 30
+                <Text
+                  style={
+                    styles.targetStatusText
+                  }
+                >
+                  {completedXP >=
+                  30
                     ? "CONCLUÍDA"
                     : "EM PROGRESSO"}
                 </Text>
               </View>
             </View>
 
-            <View style={styles.dailyBar}>
+            <View
+              style={
+                styles.dailyBar
+              }
+            >
               <LinearGradient
-                colors={["#6C4DFF", "#A875FF"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
+                colors={[
+                  "#6C4DFF",
+                  "#A875FF",
+                ]}
+                start={{
+                  x: 0,
+                  y: 0,
+                }}
+                end={{
+                  x: 1,
+                  y: 0,
+                }}
                 style={[
                   styles.dailyFill,
                   {
                     width: `${
-                      dailyTargetProgress * 100
+                      dailyTargetProgress *
+                      100
                     }%`,
                   },
                 ]}
               />
             </View>
 
-            <Text style={styles.dailyHint}>
-              Complete tasks para alcançar sua meta
+            <Text
+              style={
+                styles.dailyHint
+              }
+            >
+              Complete tasks para
+              alcançar sua meta
               diária.
             </Text>
           </View>
 
-          <View style={styles.sectionHeader}>
+          <View
+            style={
+              styles.sectionHeader
+            }
+          >
             <View>
-              <Text style={styles.sectionEyebrow}>
+              <Text
+                style={
+                  styles.sectionEyebrow
+                }
+              >
                 HOJE
               </Text>
 
-              <Text style={styles.sectionTitle}>
+              <Text
+                style={
+                  styles.sectionTitle
+                }
+              >
                 Suas tasks
               </Text>
             </View>
 
             <Pressable
-              onPress={openCreateTask}
-              style={styles.addButton}
+              onPress={
+                openCreateTask
+              }
+              style={
+                styles.addButton
+              }
             >
               <Ionicons
                 name="add"
@@ -575,53 +1182,90 @@ function App() {
             </Pressable>
           </View>
 
-          {todayTasks.length === 0 ? (
-            <View style={styles.emptyCard}>
+          {todayTasks.length ===
+          0 ? (
+            <View
+              style={
+                styles.emptyCard
+              }
+            >
               <MaterialCommunityIcons
                 name="sword-cross"
                 size={32}
                 color="#7162B7"
               />
 
-              <Text style={styles.emptyTitle}>
-                Nenhuma task por aqui
+              <Text
+                style={
+                  styles.emptyTitle
+                }
+              >
+                Nenhuma task por
+                aqui
               </Text>
 
-              <Text style={styles.emptyText}>
-                Crie sua primeira task e comece sua
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                Crie sua primeira
+                task e comece sua
                 ascensão.
               </Text>
 
               <Pressable
-                onPress={openCreateTask}
-                style={styles.emptyButton}
+                onPress={
+                  openCreateTask
+                }
+                style={
+                  styles.emptyButton
+                }
               >
-                <Text style={styles.emptyButtonText}>
+                <Text
+                  style={
+                    styles.emptyButtonText
+                  }
+                >
                   CRIAR TASK
                 </Text>
               </Pressable>
             </View>
           ) : (
-            <View style={styles.taskList}>
-              {todayTasks.map(renderTask)}
+            <View
+              style={
+                styles.taskList
+              }
+            >
+              {todayTasks.map(
+                renderTask
+              )}
             </View>
           )}
 
-          <View style={styles.infoBox}>
+          <View
+            style={styles.infoBox}
+          >
             <Ionicons
               name="information-circle-outline"
               size={19}
               color="#8175B5"
             />
 
-            <Text style={styles.infoText}>
-              Toque numa task para concluí-la. Segure
-              ou use o lápis para editar.
+            <Text
+              style={styles.infoText}
+            >
+              Toque numa task para
+              concluí-la ou desfazê-la.
+              Segure ou use o lápis
+              para editar.
             </Text>
           </View>
         </ScrollView>
 
-        <View style={styles.bottomNav}>
+        <View
+          style={styles.bottomNav}
+        >
           <NavItem
             icon="home"
             label="HOJE"
@@ -675,13 +1319,19 @@ function App() {
       </View>
 
       <Modal
-        visible={taskModalVisible}
+        visible={
+          taskModalVisible
+        }
         transparent
         animationType="fade"
-        onRequestClose={closeTaskModal}
+        onRequestClose={
+          closeTaskModal
+        }
       >
         <KeyboardAvoidingView
-          style={styles.modalBackdrop}
+          style={
+            styles.modalBackdrop
+          }
           behavior={
             Platform.OS === "ios"
               ? "padding"
@@ -689,18 +1339,40 @@ function App() {
           }
         >
           <Pressable
-            style={styles.modalDismissArea}
-            onPress={closeTaskModal}
+            style={
+              styles.modalDismissArea
+            }
+            onPress={
+              closeTaskModal
+            }
           />
 
-          <View style={styles.taskModal}>
-            <View style={styles.modalHeader}>
+          <View
+            style={
+              styles.taskModal
+            }
+          >
+            <View
+              style={
+                styles.modalHeader
+              }
+            >
               <View>
-                <Text style={styles.sectionEyebrow}>
-                  {editingTask ? "EDITAR" : "NOVA"}
+                <Text
+                  style={
+                    styles.sectionEyebrow
+                  }
+                >
+                  {editingTask
+                    ? "EDITAR"
+                    : "NOVA"}
                 </Text>
 
-                <Text style={styles.modalTitle}>
+                <Text
+                  style={
+                    styles.modalTitle
+                  }
+                >
                   {editingTask
                     ? "Editar task"
                     : "Criar task"}
@@ -708,8 +1380,12 @@ function App() {
               </View>
 
               <Pressable
-                onPress={closeTaskModal}
-                style={styles.modalClose}
+                onPress={
+                  closeTaskModal
+                }
+                style={
+                  styles.modalClose
+                }
               >
                 <Ionicons
                   name="close"
@@ -719,101 +1395,174 @@ function App() {
               </Pressable>
             </View>
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={
+                styles.inputLabel
+              }
+            >
               NOME DA TASK
             </Text>
 
             <TextInput
               value={taskTitle}
-              onChangeText={setTaskTitle}
+              onChangeText={
+                setTaskTitle
+              }
               placeholder="Ex.: Treinar 30 minutos"
               placeholderTextColor="#666477"
-              style={styles.textInput}
+              style={
+                styles.textInput
+              }
               autoFocus
               maxLength={70}
             />
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={
+                styles.inputLabel
+              }
+            >
               TIPO
             </Text>
 
-            <View style={styles.optionRow}>
+            <View
+              style={
+                styles.optionRow
+              }
+            >
               <OptionButton
                 label="DIÁRIA"
-                active={taskType === "daily"}
+                active={
+                  taskType ===
+                  "daily"
+                }
                 onPress={() =>
-                  setTaskType("daily")
+                  setTaskType(
+                    "daily"
+                  )
                 }
               />
 
               <OptionButton
                 label="ESPECIAL"
-                active={taskType === "special"}
+                active={
+                  taskType ===
+                  "special"
+                }
                 onPress={() =>
-                  setTaskType("special")
+                  setTaskType(
+                    "special"
+                  )
                 }
               />
             </View>
 
-            <Text style={styles.inputLabel}>
+            <Text
+              style={
+                styles.inputLabel
+              }
+            >
               DIFICULDADE
             </Text>
 
-            <View style={styles.difficultyGrid}>
-              {Object.entries(DIFFICULTIES).map(
+            <View
+              style={
+                styles.difficultyGrid
+              }
+            >
+              {Object.entries(
+                DIFFICULTIES
+              ).map(
                 ([key, value]) => (
                   <Pressable
                     key={key}
                     onPress={() =>
-                      setDifficulty(key)
+                      setDifficulty(
+                        key
+                      )
                     }
                     style={[
                       styles.difficultyButton,
-                      difficulty === key &&
+
+                      difficulty ===
+                        key &&
                         styles.difficultyButtonActive,
                     ]}
                   >
                     <Text
                       style={[
                         styles.difficultyName,
-                        difficulty === key &&
+
+                        difficulty ===
+                          key &&
                           styles.difficultyNameActive,
                       ]}
                     >
-                      {value.label}
+                      {
+                        value.label
+                      }
                     </Text>
 
                     <Text
                       style={[
                         styles.difficultyReward,
-                        difficulty === key &&
+
+                        difficulty ===
+                          key &&
                           styles.difficultyRewardActive,
                       ]}
                     >
                       +{value.xp} XP •{" "}
-                      {value.coins} 🪙
+                      {
+                        value.coins
+                      }{" "}
+                      🪙
                     </Text>
                   </Pressable>
                 )
               )}
             </View>
 
-            <Text style={styles.systemNote}>
-              O sistema define automaticamente a
+            <Text
+              style={
+                styles.systemNote
+              }
+            >
+              O sistema define
+              automaticamente a
               recompensa.
             </Text>
 
             <Pressable
-              onPress={saveTask}
-              style={styles.saveButton}
+              onPress={
+                saveTask
+              }
+              style={
+                styles.saveButton
+              }
             >
               <LinearGradient
-                colors={["#6548F5", "#8B63FF"]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.saveButtonGradient}
+                colors={[
+                  "#6548F5",
+                  "#8B63FF",
+                ]}
+                start={{
+                  x: 0,
+                  y: 0,
+                }}
+                end={{
+                  x: 1,
+                  y: 0,
+                }}
+                style={
+                  styles.saveButtonGradient
+                }
               >
-                <Text style={styles.saveButtonText}>
+                <Text
+                  style={
+                    styles.saveButtonText
+                  }
+                >
                   {editingTask
                     ? "SALVAR ALTERAÇÕES"
                     : "CRIAR TASK"}
@@ -836,20 +1585,25 @@ function NavItem({
   return (
     <Pressable
       onPress={onPress}
-      style={styles.navItem}
+      style={
+        styles.navItem
+      }
     >
       <Ionicons
         name={icon}
         size={21}
         color={
-          active ? "#9876FF" : "#656273"
+          active
+            ? "#9876FF"
+            : "#656273"
         }
       />
 
       <Text
         style={[
           styles.navLabel,
-          active && styles.navLabelActive,
+          active &&
+            styles.navLabelActive,
         ]}
       >
         {label}
@@ -868,7 +1622,8 @@ function OptionButton({
       onPress={onPress}
       style={[
         styles.optionButton,
-        active && styles.optionButtonActive,
+        active &&
+          styles.optionButtonActive,
       ]}
     >
       <Text
@@ -1277,223 +2032,4 @@ const styles = StyleSheet.create({
 
   emptyButtonText: {
     color: "#FFFFFF",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-
-  infoBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#0C0D15",
-    borderRadius: 12,
-    padding: 12,
-    marginTop: 12,
-  },
-
-  infoText: {
-    flex: 1,
-    color: "#696674",
-    fontSize: 9,
-    lineHeight: 14,
-    marginLeft: 8,
-  },
-
-  bottomNav: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 76,
-    backgroundColor: "#0B0C14",
-    borderTopWidth: 1,
-    borderTopColor: "#1D1E2B",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-around",
-    paddingBottom: 5,
-  },
-
-  navItem: {
-    alignItems: "center",
-    justifyContent: "center",
-    width: "20%",
-  },
-
-  navLabel: {
-    color: "#5F5C6A",
-    fontSize: 7,
-    fontWeight: "700",
-    marginTop: 4,
-  },
-
-  navLabelActive: {
-    color: "#9876FF",
-  },
-
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: "flex-end",
-    backgroundColor: "rgba(0,0,0,0.72)",
-  },
-
-  modalDismissArea: {
-    flex: 1,
-  },
-
-  taskModal: {
-    backgroundColor: "#11121D",
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
-    borderWidth: 1,
-    borderColor: "#29283A",
-    paddingHorizontal: 19,
-    paddingTop: 19,
-    paddingBottom:
-      Platform.OS === "ios" ? 30 : 18,
-  },
-
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 22,
-  },
-
-  modalTitle: {
-    color: "#F1EEF8",
-    fontSize: 23,
-    fontWeight: "700",
-    marginTop: 3,
-  },
-
-  modalClose: {
-    width: 35,
-    height: 35,
-    borderRadius: 11,
-    backgroundColor: "#1A1B27",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  inputLabel: {
-    color: "#77728E",
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.3,
-    marginBottom: 7,
-  },
-
-  textInput: {
-    height: 48,
-    backgroundColor: "#0B0C14",
-    borderWidth: 1,
-    borderColor: "#29283A",
-    borderRadius: 12,
-    paddingHorizontal: 13,
-    color: "#F0EDF7",
-    fontSize: 14,
-    marginBottom: 17,
-  },
-
-  optionRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 17,
-  },
-
-  optionButton: {
-    flex: 1,
-    height: 41,
-    borderRadius: 11,
-    borderWidth: 1,
-    borderColor: "#2A2939",
-    backgroundColor: "#0B0C14",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  optionButtonActive: {
-    borderColor: "#7256E7",
-    backgroundColor: "#211B3A",
-  },
-
-  optionButtonText: {
-    color: "#777383",
-    fontSize: 10,
-    fontWeight: "800",
-  },
-
-  optionButtonTextActive: {
-    color: "#B39AFF",
-  },
-
-  difficultyGrid: {
-    gap: 7,
-  },
-
-  difficultyButton: {
-    backgroundColor: "#0B0C14",
-    borderWidth: 1,
-    borderColor: "#29283A",
-    borderRadius: 11,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  difficultyButtonActive: {
-    backgroundColor: "#201A38",
-    borderColor: "#6E53DB",
-  },
-
-  difficultyName: {
-    color: "#B0ACB9",
-    fontSize: 11,
-    fontWeight: "600",
-  },
-
-  difficultyNameActive: {
-    color: "#E4DFFF",
-  },
-
-  difficultyReward: {
-    color: "#686474",
-    fontSize: 9,
-  },
-
-  difficultyRewardActive: {
-    color: "#9F86FF",
-  },
-
-  systemNote: {
-    color: "#5E5A69",
-    fontSize: 9,
-    marginTop: 12,
-    textAlign: "center",
-  },
-
-  saveButton: {
-    height: 49,
-    borderRadius: 13,
-    overflow: "hidden",
-    marginTop: 15,
-  },
-
-  saveButtonGradient: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  saveButtonText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 1,
-  },
-});
-
-export default App;
+   
