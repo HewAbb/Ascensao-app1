@@ -22,27 +22,43 @@ const avatar = require("./assets/avatar-neroth.png");
 
 const STORAGE_KEY = "@ascensao_v01_state";
 
+const WEEK_DAYS = [
+  { value: 0, short: "DOM", label: "Domingo" },
+  { value: 1, short: "SEG", label: "Segunda" },
+  { value: 2, short: "TER", label: "Terça" },
+  { value: 3, short: "QUA", label: "Quarta" },
+  { value: 4, short: "QUI", label: "Quinta" },
+  { value: 5, short: "SEX", label: "Sexta" },
+  { value: 6, short: "SÁB", label: "Sábado" },
+];
+
+const ALL_WEEK_DAYS = WEEK_DAYS.map((day) => day.value);
+
 const DIFFICULTIES = {
   muito_simples: {
     label: "Muito simples",
     xp: 5,
     coins: 0,
   },
+
   simples: {
     label: "Simples",
     xp: 10,
     coins: 1,
   },
+
   moderada: {
     label: "Moderada",
     xp: 15,
     coins: 2,
   },
+
   dificil: {
     label: "Difícil",
     xp: 20,
     coins: 2,
   },
+
   grande: {
     label: "Grande",
     xp: 30,
@@ -57,6 +73,7 @@ const initialState = {
     xp: 0,
     coins: 0,
   },
+
   tasks: [],
 };
 
@@ -70,8 +87,14 @@ function getTodayKey() {
   return `${year}-${month}-${day}`;
 }
 
+function getCurrentWeekDay() {
+  return new Date().getDay();
+}
+
 function createId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return `${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
 }
 
 function calculateLevel(xp) {
@@ -91,6 +114,28 @@ function calculateLevel(xp) {
 }
 
 /*
+  Garante que uma task diária antiga,
+  criada antes da implementação dos dias da semana,
+  receba todos os dias como padrão.
+*/
+function normalizeWeekDays(task) {
+  if (
+    task.type !== "daily"
+  ) {
+    return task.daysOfWeek;
+  }
+
+  if (
+    Array.isArray(task.daysOfWeek) &&
+    task.daysOfWeek.length > 0
+  ) {
+    return task.daysOfWeek;
+  }
+
+  return ALL_WEEK_DAYS;
+}
+
+/*
   Atualiza as tasks para o dia atual.
 
   REGRAS:
@@ -101,6 +146,9 @@ function calculateLevel(xp) {
   - Se não concluídas ontem, são perdidas e começam
     novamente hoje.
   - A recompensa pode ser conquistada novamente hoje.
+  - Cada task possui seus próprios dias da semana.
+  - Uma diária só aparece quando o dia atual está
+    dentro de daysOfWeek.
 
   ESPECIAIS
   - Se não concluídas, permanecem disponíveis.
@@ -113,31 +161,50 @@ function refreshTasksForDate(tasks, today) {
     // TASK DIÁRIA
     // ==========================================
     if (task.type === "daily") {
+      const normalizedDays =
+        normalizeWeekDays(task);
+
       if (task.date !== today) {
         result.push({
           ...task,
+
+          daysOfWeek:
+            normalizedDays,
+
           date: today,
+
           completed: false,
+
           completedAt: null,
+
           awardedXP: 0,
+
           awardedCoins: 0,
         });
       } else {
         result.push({
           ...task,
+
+          daysOfWeek:
+            normalizedDays,
+
           completedAt:
             task.completedAt ||
-            (task.completed ? today : null),
+            (task.completed
+              ? today
+              : null),
 
           awardedXP:
-            typeof task.awardedXP === "number"
+            typeof task.awardedXP ===
+            "number"
               ? task.awardedXP
               : task.completed
               ? task.xp
               : 0,
 
           awardedCoins:
-            typeof task.awardedCoins === "number"
+            typeof task.awardedCoins ===
+            "number"
               ? task.awardedCoins
               : task.completed
               ? task.coins
@@ -154,7 +221,9 @@ function refreshTasksForDate(tasks, today) {
     if (task.type === "special") {
       const completedAt =
         task.completedAt ||
-        (task.completed ? task.date : null);
+        (task.completed
+          ? task.date
+          : null);
 
       // Especial concluída em dia anterior:
       // desaparece.
@@ -170,17 +239,20 @@ function refreshTasksForDate(tasks, today) {
       // continua disponível.
       result.push({
         ...task,
+
         completedAt,
 
         awardedXP:
-          typeof task.awardedXP === "number"
+          typeof task.awardedXP ===
+          "number"
             ? task.awardedXP
             : task.completed
             ? task.xp
             : 0,
 
         awardedCoins:
-          typeof task.awardedCoins === "number"
+          typeof task.awardedCoins ===
+          "number"
             ? task.awardedCoins
             : task.completed
             ? task.coins
@@ -195,10 +267,14 @@ function refreshTasksForDate(tasks, today) {
 }
 
 function App() {
-  const [state, setState] = useState(initialState);
-  const [loaded, setLoaded] = useState(false);
+  const [state, setState] =
+    useState(initialState);
 
-  const [today, setToday] = useState(getTodayKey());
+  const [loaded, setLoaded] =
+    useState(false);
+
+  const [today, setToday] =
+    useState(getTodayKey());
 
   const [taskModalVisible, setTaskModalVisible] =
     useState(false);
@@ -215,20 +291,25 @@ function App() {
   const [difficulty, setDifficulty] =
     useState("simples");
 
+  const [selectedDays, setSelectedDays] =
+    useState(ALL_WEEK_DAYS);
+
   /*
     Verifica se o dia mudou enquanto o app
     permanece aberto.
   */
   useEffect(() => {
     const interval = setInterval(() => {
-      const currentDay = getTodayKey();
+      const currentDay =
+        getTodayKey();
 
       if (currentDay !== today) {
         setToday(currentDay);
       }
     }, 30000);
 
-    return () => clearInterval(interval);
+    return () =>
+      clearInterval(interval);
   }, [today]);
 
   /*
@@ -258,10 +339,12 @@ function App() {
 
     setState((current) => ({
       ...current,
-      tasks: refreshTasksForDate(
-        current.tasks,
-        today
-      ),
+
+      tasks:
+        refreshTasksForDate(
+          current.tasks,
+          today
+        ),
     }));
   }, [today, loaded]);
 
@@ -277,9 +360,11 @@ function App() {
         return;
       }
 
-      const parsed = JSON.parse(saved);
+      const parsed =
+        JSON.parse(saved);
 
-      const currentDay = getTodayKey();
+      const currentDay =
+        getTodayKey();
 
       const updatedTasks =
         refreshTasksForDate(
@@ -310,73 +395,175 @@ function App() {
 
   /*
     Tasks que aparecem na Home hoje.
+
+    Especiais:
+    - sempre aparecem enquanto estiverem disponíveis.
+
+    Diárias:
+    - precisam estar marcadas para o dia atual.
   */
   const todayTasks = useMemo(() => {
-    return state.tasks.filter((task) => {
-      if (task.type === "special") {
-        return true;
-      }
+    const currentWeekDay =
+      getCurrentWeekDay();
 
-      return task.date === today;
-    });
+    return state.tasks.filter(
+      (task) => {
+        if (
+          task.type ===
+          "special"
+        ) {
+          return true;
+        }
+
+        const days =
+          normalizeWeekDays(
+            task
+          );
+
+        return (
+          task.date === today &&
+          days.includes(
+            currentWeekDay
+          )
+        );
+      }
+    );
   }, [state.tasks, today]);
 
   /*
-    IMPORTANTE:
+    Meta de Hoje.
 
-    A Meta de Hoje NÃO possui um contador separado.
+    Usamos awardedXP para representar
+    exatamente quanto XP aquela task
+    concedeu quando foi concluída.
 
-    Ela é calculada diretamente pelas tasks concluídas.
-
-    Portanto:
-
-    15 XP concluídos = 15/30
-    desfazer       = 0/30
-    excluir        = 0/30
-
-    Isso evita inconsistências.
+    Isso evita problemas caso uma task
+    concluída seja editada depois.
   */
   const completedXP = useMemo(() => {
     return todayTasks
-      .filter((task) => task.completed)
+      .filter(
+        (task) =>
+          task.completed
+      )
       .reduce(
         (total, task) =>
-          total + task.xp,
+          total +
+          (typeof task.awardedXP ===
+          "number"
+            ? task.awardedXP
+            : task.xp),
         0
       );
   }, [todayTasks]);
 
   const dailyTargetProgress =
-    Math.min(completedXP / 30, 1);
+    Math.min(
+      completedXP / 30,
+      1
+    );
 
-  const levelInfo = calculateLevel(
-    state.player.xp
-  );
+  const levelInfo =
+    calculateLevel(
+      state.player.xp
+    );
 
   function openCreateTask() {
     setEditingTask(null);
+
     setTaskTitle("");
+
     setTaskType("daily");
+
     setDifficulty("simples");
+
+    setSelectedDays(
+      ALL_WEEK_DAYS
+    );
+
     setTaskModalVisible(true);
   }
 
   function openEditTask(task) {
     setEditingTask(task);
-    setTaskTitle(task.title);
-    setTaskType(task.type);
-    setDifficulty(task.difficulty);
+
+    setTaskTitle(
+      task.title
+    );
+
+    setTaskType(
+      task.type
+    );
+
+    setDifficulty(
+      task.difficulty
+    );
+
+    setSelectedDays(
+      task.type === "daily"
+        ? normalizeWeekDays(
+            task
+          )
+        : ALL_WEEK_DAYS
+    );
+
     setTaskModalVisible(true);
   }
 
   function closeTaskModal() {
     setTaskModalVisible(false);
+
     setEditingTask(null);
+
     setTaskTitle("");
+
+    setSelectedDays(
+      ALL_WEEK_DAYS
+    );
+  }
+
+  function toggleWeekDay(day) {
+    setSelectedDays(
+      (current) => {
+        if (
+          current.includes(day)
+        ) {
+          /*
+            Impede que o usuário
+            deixe a task sem nenhum
+            dia selecionado.
+          */
+          if (
+            current.length === 1
+          ) {
+            return current;
+          }
+
+          return current.filter(
+            (item) =>
+              item !== day
+          );
+        }
+
+        return [
+          ...current,
+          day,
+        ].sort(
+          (a, b) => a - b
+        );
+      }
+    );
+  }
+
+  function selectAllDays() {
+    setSelectedDays(
+      ALL_WEEK_DAYS
+    );
   }
 
   function saveTask() {
-    const title = taskTitle.trim();
+    const title =
+      taskTitle.trim();
 
     if (!title) {
       Alert.alert(
@@ -387,75 +574,99 @@ function App() {
       return;
     }
 
+    if (
+      taskType === "daily" &&
+      selectedDays.length === 0
+    ) {
+      Alert.alert(
+        "Escolha os dias",
+        "Selecione pelo menos um dia da semana."
+      );
+
+      return;
+    }
+
     const reward =
-      DIFFICULTIES[difficulty];
+      DIFFICULTIES[
+        difficulty
+      ];
 
     if (editingTask) {
       setState((current) => ({
         ...current,
 
-        tasks: current.tasks.map(
-          (task) => {
-            if (
-              task.id !==
-              editingTask.id
-            ) {
-              return task;
+        tasks:
+          current.tasks.map(
+            (task) => {
+              if (
+                task.id !==
+                editingTask.id
+              ) {
+                return task;
+              }
+
+              const isCompleted =
+                task.completed;
+
+              return {
+                ...task,
+
+                title,
+
+                type:
+                  taskType,
+
+                difficulty,
+
+                xp:
+                  reward.xp,
+
+                coins:
+                  reward.coins,
+
+                daysOfWeek:
+                  taskType ===
+                  "daily"
+                    ? selectedDays
+                    : undefined,
+
+                completed:
+                  isCompleted,
+
+                completedAt:
+                  isCompleted
+                    ? task.completedAt ||
+                      today
+                    : null,
+
+                /*
+                  Mantemos a recompensa
+                  que realmente foi dada.
+                */
+                awardedXP:
+                  isCompleted
+                    ? typeof task.awardedXP ===
+                      "number"
+                      ? task.awardedXP
+                      : task.xp
+                    : 0,
+
+                awardedCoins:
+                  isCompleted
+                    ? typeof task.awardedCoins ===
+                      "number"
+                      ? task.awardedCoins
+                      : task.coins
+                    : 0,
+
+                date:
+                  taskType ===
+                  "daily"
+                    ? today
+                    : task.date,
+              };
             }
-
-            const isCompleted =
-              task.completed;
-
-            return {
-              ...task,
-
-              title,
-
-              type: taskType,
-
-              difficulty,
-
-              xp: reward.xp,
-
-              coins: reward.coins,
-
-              completed:
-                isCompleted,
-
-              completedAt:
-                isCompleted
-                  ? task.completedAt ||
-                    today
-                  : null,
-
-              /*
-                Mantemos a recompensa
-                que realmente foi dada.
-              */
-              awardedXP:
-                isCompleted
-                  ? typeof task.awardedXP ===
-                    "number"
-                    ? task.awardedXP
-                    : task.xp
-                  : 0,
-
-              awardedCoins:
-                isCompleted
-                  ? typeof task.awardedCoins ===
-                    "number"
-                    ? task.awardedCoins
-                    : task.coins
-                  : 0,
-
-              date:
-                taskType ===
-                "daily"
-                  ? today
-                  : task.date,
-            };
-          }
-        ),
+          ),
       }));
     } else {
       const newTask = {
@@ -467,9 +678,17 @@ function App() {
 
         difficulty,
 
-        xp: reward.xp,
+        xp:
+          reward.xp,
 
-        coins: reward.coins,
+        coins:
+          reward.coins,
+
+        daysOfWeek:
+          taskType ===
+          "daily"
+            ? selectedDays
+            : undefined,
 
         completed: false,
 
@@ -504,6 +723,10 @@ function App() {
     Se ela estava concluída,
     removemos também exatamente
     as recompensas que ela concedeu.
+
+    A Meta de Hoje é recalculada
+    automaticamente porque ela é
+    baseada nas tasks existentes.
   */
   function deleteTask(task) {
     Alert.alert(
@@ -583,15 +806,17 @@ function App() {
       - moedas
       - XP da Meta de Hoje
 
-    A Meta de Hoje é recalculada automaticamente
-    com base em todayTasks.
+    A Meta de Hoje é recalculada
+    automaticamente com base nas
+    tasks concluídas.
   */
   function toggleTask(task) {
     setState((current) => {
       const currentTask =
         current.tasks.find(
           (item) =>
-            item.id === task.id
+            item.id ===
+            task.id
         );
 
       if (!currentTask) {
@@ -644,14 +869,17 @@ function App() {
                   ? {
                       ...item,
 
-                      completed: false,
+                      completed:
+                        false,
 
                       completedAt:
                         null,
 
-                      awardedXP: 0,
+                      awardedXP:
+                        0,
 
-                      awardedCoins: 0,
+                      awardedCoins:
+                        0,
                     }
                   : item
             ),
@@ -684,7 +912,8 @@ function App() {
                 ? {
                     ...item,
 
-                    completed: true,
+                    completed:
+                      true,
 
                     completedAt:
                       today,
@@ -739,10 +968,14 @@ function App() {
         </View>
 
         <View
-          style={styles.taskContent}
+          style={
+            styles.taskContent
+          }
         >
           <View
-            style={styles.taskTitleRow}
+            style={
+              styles.taskTitleRow
+            }
           >
             <Text
               style={[
@@ -776,7 +1009,9 @@ function App() {
           </View>
 
           <View
-            style={styles.taskMeta}
+            style={
+              styles.taskMeta
+            }
           >
             <Text
               style={
@@ -821,7 +1056,9 @@ function App() {
         </View>
 
         <View
-          style={styles.taskActions}
+          style={
+            styles.taskActions
+          }
         >
           <Pressable
             onPress={() =>
@@ -867,13 +1104,17 @@ function App() {
         }
       >
         <Text
-          style={styles.loadingTitle}
+          style={
+            styles.loadingTitle
+          }
         >
           ASCENSÃO
         </Text>
 
         <Text
-          style={styles.loadingText}
+          style={
+            styles.loadingText
+          }
         >
           Carregando seu progresso...
         </Text>
@@ -901,11 +1142,17 @@ function App() {
             styles.scrollContent
           }
         >
+          {/* ======================================
+              HEADER
+          ====================================== */}
+
           <View
             style={styles.header}
           >
             <View
-              style={styles.profileArea}
+              style={
+                styles.profileArea
+              }
             >
               <Pressable
                 onPress={() =>
@@ -975,6 +1222,10 @@ function App() {
             </View>
           </View>
 
+          {/* ======================================
+              PROGRESSÃO
+          ====================================== */}
+
           <View
             style={
               styles.progressCard
@@ -1037,6 +1288,10 @@ function App() {
               />
             </View>
           </View>
+
+          {/* ======================================
+              META DIÁRIA
+          ====================================== */}
 
           <View
             style={styles.dailyCard}
@@ -1142,6 +1397,10 @@ function App() {
               diária.
             </Text>
           </View>
+
+          {/* ======================================
+              TASKS
+          ====================================== */}
 
           <View
             style={
@@ -1263,6 +1522,10 @@ function App() {
           </View>
         </ScrollView>
 
+        {/* ======================================
+            BOTTOM NAV
+        ====================================== */}
+
         <View
           style={styles.bottomNav}
         >
@@ -1318,6 +1581,10 @@ function App() {
         </View>
       </View>
 
+      {/* ========================================
+          MODAL DE TASK
+      ======================================== */}
+
       <Modal
         visible={
           taskModalVisible
@@ -1352,223 +1619,339 @@ function App() {
               styles.taskModal
             }
           >
-            <View
-              style={
-                styles.modalHeader
+            <ScrollView
+              showsVerticalScrollIndicator={
+                false
+              }
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={
+                styles.modalScrollContent
               }
             >
-              <View>
-                <Text
-                  style={
-                    styles.sectionEyebrow
-                  }
-                >
-                  {editingTask
-                    ? "EDITAR"
-                    : "NOVA"}
-                </Text>
+              <View
+                style={
+                  styles.modalHeader
+                }
+              >
+                <View>
+                  <Text
+                    style={
+                      styles.sectionEyebrow
+                    }
+                  >
+                    {editingTask
+                      ? "EDITAR"
+                      : "NOVA"}
+                  </Text>
 
-                <Text
+                  <Text
+                    style={
+                      styles.modalTitle
+                    }
+                  >
+                    {editingTask
+                      ? "Editar task"
+                      : "Criar task"}
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={
+                    closeTaskModal
+                  }
                   style={
-                    styles.modalTitle
+                    styles.modalClose
                   }
                 >
-                  {editingTask
-                    ? "Editar task"
-                    : "Criar task"}
-                </Text>
+                  <Ionicons
+                    name="close"
+                    size={22}
+                    color="#AAA7BA"
+                  />
+                </Pressable>
               </View>
+
+              {/* NOME */}
+
+              <Text
+                style={
+                  styles.inputLabel
+                }
+              >
+                NOME DA TASK
+              </Text>
+
+              <TextInput
+                value={
+                  taskTitle
+                }
+                onChangeText={
+                  setTaskTitle
+                }
+                placeholder="Ex.: Treinar 30 minutos"
+                placeholderTextColor="#666477"
+                style={
+                  styles.textInput
+                }
+                autoFocus
+                maxLength={70}
+              />
+
+              {/* TIPO */}
+
+              <Text
+                style={
+                  styles.inputLabel
+                }
+              >
+                TIPO
+              </Text>
+
+              <View
+                style={
+                  styles.optionRow
+                }
+              >
+                <OptionButton
+                  label="DIÁRIA"
+                  active={
+                    taskType ===
+                    "daily"
+                  }
+                  onPress={() =>
+                    setTaskType(
+                      "daily"
+                    )
+                  }
+                />
+
+                <OptionButton
+                  label="ESPECIAL"
+                  active={
+                    taskType ===
+                    "special"
+                  }
+                  onPress={() =>
+                    setTaskType(
+                      "special"
+                    )
+                  }
+                />
+              </View>
+
+              {/* DIAS DA SEMANA */}
+
+              {taskType ===
+                "daily" && (
+                <>
+                  <View
+                    style={
+                      styles.daysHeader
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.inputLabel
+                      }
+                    >
+                      DIAS DA SEMANA
+                    </Text>
+
+                    <Pressable
+                      onPress={
+                        selectAllDays
+                      }
+                      hitSlop={8}
+                    >
+                      <Text
+                        style={
+                          styles.selectAllText
+                        }
+                      >
+                        TODOS
+                      </Text>
+                    </Pressable>
+                  </View>
+
+                  <View
+                    style={
+                      styles.weekDaysGrid
+                    }
+                  >
+                    {WEEK_DAYS.map(
+                      (day) => {
+                        const active =
+                          selectedDays.includes(
+                            day.value
+                          );
+
+                        return (
+                          <Pressable
+                            key={
+                              day.value
+                            }
+                            onPress={() =>
+                              toggleWeekDay(
+                                day.value
+                              )
+                            }
+                            style={[
+                              styles.weekDayButton,
+
+                              active &&
+                                styles.weekDayButtonActive,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.weekDayText,
+
+                                active &&
+                                  styles.weekDayTextActive,
+                              ]}
+                            >
+                              {
+                                day.short
+                              }
+                            </Text>
+                          </Pressable>
+                        );
+                      }
+                    )}
+                  </View>
+
+                  <Text
+                    style={
+                      styles.daysHint
+                    }
+                  >
+                    A task aparecerá
+                    somente nos dias
+                    selecionados.
+                  </Text>
+                </>
+              )}
+
+              {/* DIFICULDADE */}
+
+              <Text
+                style={
+                  styles.inputLabel
+                }
+              >
+                DIFICULDADE
+              </Text>
+
+              <View
+                style={
+                  styles.difficultyGrid
+                }
+              >
+                {Object.entries(
+                  DIFFICULTIES
+                ).map(
+                  ([
+                    key,
+                    value,
+                  ]) => (
+                    <Pressable
+                      key={key}
+                      onPress={() =>
+                        setDifficulty(
+                          key
+                        )
+                      }
+                      style={[
+                        styles.difficultyButton,
+
+                        difficulty ===
+                          key &&
+                          styles.difficultyButtonActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.difficultyName,
+
+                          difficulty ===
+                            key &&
+                            styles.difficultyNameActive,
+                        ]}
+                      >
+                        {
+                          value.label
+                        }
+                      </Text>
+
+                      <Text
+                        style={[
+                          styles.difficultyReward,
+
+                          difficulty ===
+                            key &&
+                            styles.difficultyRewardActive,
+                        ]}
+                      >
+                        +{value.xp} XP •{" "}
+                        {
+                          value.coins
+                        }{" "}
+                        🪙
+                      </Text>
+                    </Pressable>
+                  )
+                )}
+              </View>
+
+              <Text
+                style={
+                  styles.systemNote
+                }
+              >
+                O sistema define
+                automaticamente a
+                recompensa.
+              </Text>
+
+              {/* SALVAR */}
 
               <Pressable
                 onPress={
-                  closeTaskModal
+                  saveTask
                 }
                 style={
-                  styles.modalClose
+                  styles.saveButton
                 }
               >
-                <Ionicons
-                  name="close"
-                  size={22}
-                  color="#AAA7BA"
-                />
-              </Pressable>
-            </View>
-
-            <Text
-              style={
-                styles.inputLabel
-              }
-            >
-              NOME DA TASK
-            </Text>
-
-            <TextInput
-              value={taskTitle}
-              onChangeText={
-                setTaskTitle
-              }
-              placeholder="Ex.: Treinar 30 minutos"
-              placeholderTextColor="#666477"
-              style={
-                styles.textInput
-              }
-              autoFocus
-              maxLength={70}
-            />
-
-            <Text
-              style={
-                styles.inputLabel
-              }
-            >
-              TIPO
-            </Text>
-
-            <View
-              style={
-                styles.optionRow
-              }
-            >
-              <OptionButton
-                label="DIÁRIA"
-                active={
-                  taskType ===
-                  "daily"
-                }
-                onPress={() =>
-                  setTaskType(
-                    "daily"
-                  )
-                }
-              />
-
-              <OptionButton
-                label="ESPECIAL"
-                active={
-                  taskType ===
-                  "special"
-                }
-                onPress={() =>
-                  setTaskType(
-                    "special"
-                  )
-                }
-              />
-            </View>
-
-            <Text
-              style={
-                styles.inputLabel
-              }
-            >
-              DIFICULDADE
-            </Text>
-
-            <View
-              style={
-                styles.difficultyGrid
-              }
-            >
-              {Object.entries(
-                DIFFICULTIES
-              ).map(
-                ([key, value]) => (
-                  <Pressable
-                    key={key}
-                    onPress={() =>
-                      setDifficulty(
-                        key
-                      )
-                    }
-                    style={[
-                      styles.difficultyButton,
-
-                      difficulty ===
-                        key &&
-                        styles.difficultyButtonActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.difficultyName,
-
-                        difficulty ===
-                          key &&
-                          styles.difficultyNameActive,
-                      ]}
-                    >
-                      {
-                        value.label
-                      }
-                    </Text>
-
-                    <Text
-                      style={[
-                        styles.difficultyReward,
-
-                        difficulty ===
-                          key &&
-                          styles.difficultyRewardActive,
-                      ]}
-                    >
-                      +{value.xp} XP •{" "}
-                      {
-                        value.coins
-                      }{" "}
-                      🪙
-                    </Text>
-                  </Pressable>
-                )
-              )}
-            </View>
-
-            <Text
-              style={
-                styles.systemNote
-              }
-            >
-              O sistema define
-              automaticamente a
-              recompensa.
-            </Text>
-
-            <Pressable
-              onPress={
-                saveTask
-              }
-              style={
-                styles.saveButton
-              }
-            >
-              <LinearGradient
-                colors={[
-                  "#6548F5",
-                  "#8B63FF",
-                ]}
-                start={{
-                  x: 0,
-                  y: 0,
-                }}
-                end={{
-                  x: 1,
-                  y: 0,
-                }}
-                style={
-                  styles.saveButtonGradient
-                }
-              >
-                <Text
+                <LinearGradient
+                  colors={[
+                    "#6548F5",
+                    "#8B63FF",
+                  ]}
+                  start={{
+                    x: 0,
+                    y: 0,
+                  }}
+                  end={{
+                    x: 1,
+                    y: 0,
+                  }}
                   style={
-                    styles.saveButtonText
+                    styles.saveButtonGradient
                   }
                 >
-                  {editingTask
-                    ? "SALVAR ALTERAÇÕES"
-                    : "CRIAR TASK"}
-                </Text>
-              </LinearGradient>
-            </Pressable>
+                  <Text
+                    style={
+                      styles.saveButtonText
+                    }
+                  >
+                    {editingTask
+                      ? "SALVAR ALTERAÇÕES"
+                      : "CRIAR TASK"}
+                  </Text>
+                </LinearGradient>
+              </Pressable>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -2032,4 +2415,300 @@ const styles = StyleSheet.create({
 
   emptyButtonText: {
     color: "#FFFFFF",
-   
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+
+  infoBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#0D0E17",
+    borderWidth: 1,
+    borderColor: "#1D1E2B",
+    borderRadius: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    marginTop: 12,
+  },
+
+  infoText: {
+    flex: 1,
+    color: "#6F6C7B",
+    fontSize: 10,
+    lineHeight: 15,
+    marginLeft: 8,
+  },
+
+  bottomNav: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 76,
+    backgroundColor: "#0B0C14",
+    borderTopWidth: 1,
+    borderTopColor: "#1D1E29",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingHorizontal: 4,
+  },
+
+  navItem: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  navLabel: {
+    color: "#656273",
+    fontSize: 7,
+    fontWeight: "700",
+    marginTop: 5,
+    letterSpacing: 0.4,
+  },
+
+  navLabelActive: {
+    color: "#9876FF",
+  },
+
+  // ==========================================
+  // MODAL
+  // ==========================================
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.72)",
+    justifyContent: "flex-end",
+  },
+
+  modalDismissArea: {
+    flex: 1,
+  },
+
+  taskModal: {
+    backgroundColor: "#11121D",
+    borderTopLeftRadius: 25,
+    borderTopRightRadius: 25,
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: "#29283A",
+    maxHeight: "90%",
+  },
+
+  modalScrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 30,
+  },
+
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+
+  modalTitle: {
+    color: "#F2EFF8",
+    fontSize: 23,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+
+  modalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    backgroundColor: "#1B1C29",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  inputLabel: {
+    color: "#77719B",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 1.4,
+    marginBottom: 8,
+    marginTop: 5,
+  },
+
+  textInput: {
+    height: 48,
+    backgroundColor: "#0B0C14",
+    borderWidth: 1,
+    borderColor: "#292A39",
+    borderRadius: 12,
+    color: "#E9E6F1",
+    paddingHorizontal: 13,
+    fontSize: 13,
+    marginBottom: 17,
+  },
+
+  optionRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 17,
+  },
+
+  optionButton: {
+    flex: 1,
+    height: 42,
+    borderRadius: 11,
+    backgroundColor: "#0B0C14",
+    borderWidth: 1,
+    borderColor: "#292A39",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  optionButtonActive: {
+    backgroundColor: "#2A2050",
+    borderColor: "#7655E8",
+  },
+
+  optionButtonText: {
+    color: "#777487",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+
+  optionButtonTextActive: {
+    color: "#B59EFF",
+  },
+
+  // ==========================================
+  // DIAS DA SEMANA
+  // ==========================================
+
+  daysHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+
+  selectAllText: {
+    color: "#9876FF",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+  },
+
+  weekDaysGrid: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginBottom: 6,
+  },
+
+  weekDayButton: {
+    width: 42,
+    height: 40,
+    borderRadius: 11,
+    backgroundColor: "#0B0C14",
+    borderWidth: 1,
+    borderColor: "#292A39",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  weekDayButtonActive: {
+    backgroundColor: "#2A2050",
+    borderColor: "#7655E8",
+  },
+
+  weekDayText: {
+    color: "#686577",
+    fontSize: 8,
+    fontWeight: "800",
+  },
+
+  weekDayTextActive: {
+    color: "#B59EFF",
+  },
+
+  daysHint: {
+    color: "#646171",
+    fontSize: 9,
+    marginBottom: 17,
+  },
+
+  // ==========================================
+  // DIFICULDADE
+  // ==========================================
+
+  difficultyGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    marginBottom: 8,
+  },
+
+  difficultyButton: {
+    width: "48%",
+    minHeight: 53,
+    backgroundColor: "#0B0C14",
+    borderWidth: 1,
+    borderColor: "#292A39",
+    borderRadius: 11,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    justifyContent: "center",
+  },
+
+  difficultyButtonActive: {
+    backgroundColor: "#2A2050",
+    borderColor: "#7655E8",
+  },
+
+  difficultyName: {
+    color: "#858190",
+    fontSize: 10,
+    fontWeight: "700",
+  },
+
+  difficultyNameActive: {
+    color: "#E3DDF5",
+  },
+
+  difficultyReward: {
+    color: "#666273",
+    fontSize: 9,
+    marginTop: 3,
+  },
+
+  difficultyRewardActive: {
+    color: "#A88FFF",
+  },
+
+  systemNote: {
+    color: "#666273",
+    fontSize: 9,
+    lineHeight: 14,
+    marginTop: 4,
+    marginBottom: 17,
+  },
+
+  saveButton: {
+    borderRadius: 12,
+    overflow: "hidden",
+  },
+
+  saveButtonGradient: {
+    height: 49,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  saveButtonText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.9,
+  },
+});
+
+export default App;
