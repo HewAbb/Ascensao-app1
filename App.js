@@ -21,6 +21,8 @@ import { LinearGradient } from "expo-linear-gradient";
 const avatar = require("./assets/avatar-neroth.png");
 
 const STORAGE_KEY = "@ascensao_v01_state";
+const DAILY_TARGET_XP = 30;
+const MAX_SAVE_POINTS = 5;
 
 const WEEK_DAYS = [
   { value: 0, short: "DOM", label: "Domingo" },
@@ -75,6 +77,16 @@ const initialState = {
   },
 
   tasks: [],
+
+  streak: {
+    current: 0,
+    best: 0,
+    lastCompletedDate: null,
+    savePoints: 0,
+    lastSavePointWeek: null,
+    completedDates: [],
+    protectedDates: [],
+  },
 };
 
 function getTodayKey() {
@@ -113,15 +125,103 @@ function calculateLevel(xp) {
   };
 }
 
+function getPreviousDateKey(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  date.setDate(date.getDate() - 1);
+
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function getWeekKey(dateKey) {
+  const date = new Date(`${dateKey}T12:00:00`);
+  const day = date.getDay();
+  const sunday = new Date(date);
+
+  sunday.setDate(date.getDate() - day);
+
+  const year = sunday.getFullYear();
+  const month = String(sunday.getMonth() + 1).padStart(2, "0");
+  const dateNumber = String(sunday.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${dateNumber}`;
+}
+
+function calculateCompletedXPForDate(tasks, dateKey) {
+  return tasks
+    .filter((task) => {
+      if (task.date !== dateKey) return false;
+      if (!task.completed) return false;
+
+      if (task.type === "daily") {
+        const days = normalizeWeekDays(task);
+        const weekDay = new Date(`${dateKey}T12:00:00`).getDay();
+
+        return days.includes(weekDay);
+      }
+
+      return task.completedAt === dateKey || !task.completedAt;
+    })
+    .reduce(
+      (total, task) =>
+        total +
+        (typeof task.awardedXP === "number"
+          ? task.awardedXP
+          : task.xp),
+      0
+    );
+}
+
+function normalizeStreak(streak) {
+  const source = streak || {};
+
+  return {
+    current:
+      typeof source.current === "number"
+        ? source.current
+        : 0,
+
+    best:
+      typeof source.best === "number"
+        ? source.best
+        : 0,
+
+    lastCompletedDate:
+      source.lastCompletedDate || null,
+
+    savePoints:
+      typeof source.savePoints === "number"
+        ? Math.min(
+            Math.max(source.savePoints, 0),
+            MAX_SAVE_POINTS
+          )
+        : 0,
+
+    lastSavePointWeek:
+      source.lastSavePointWeek || null,
+
+    completedDates:
+      Array.isArray(source.completedDates)
+        ? source.completedDates
+        : [],
+
+    protectedDates:
+      Array.isArray(source.protectedDates)
+        ? source.protectedDates
+        : [],
+  };
+}
+
 /*
   Garante que uma task diária antiga,
   criada antes da implementação dos dias da semana,
   receba todos os dias como padrão.
 */
 function normalizeWeekDays(task) {
-  if (
-    task.type !== "daily"
-  ) {
+  if (task.type !== "daily") {
     return task.daysOfWeek;
   }
 
@@ -294,6 +394,12 @@ function App() {
   const [selectedDays, setSelectedDays] =
     useState(ALL_WEEK_DAYS);
 
+  const [streakScreenVisible, setStreakScreenVisible] =
+    useState(false);
+
+  const [streakRiskVisible, setStreakRiskVisible] =
+    useState(true);
+
   /*
     Verifica se o dia mudou enquanto o app
     permanece aberto.
@@ -337,15 +443,83 @@ function App() {
   useEffect(() => {
     if (!loaded) return;
 
-    setState((current) => ({
-      ...current,
+    setStreakRiskVisible(true);
 
-      tasks:
-        refreshTasksForDate(
-          current.tasks,
-          today
-        ),
-    }));
+    setState((current) => {
+      const currentStreak =
+        normalizeStreak(
+          current.streak
+        );
+
+      const previousDay =
+        getPreviousDateKey(today);
+
+      const previousCompleted =
+        currentStreak.completedDates.includes(
+          previousDay
+        );
+
+      const previousProtected =
+        currentStreak.protectedDates.includes(
+          previousDay
+        );
+
+      let nextStreak =
+        currentStreak;
+
+      /*
+        Se o dia anterior não foi concluído
+        nem protegido, a sequência é quebrada.
+      */
+      if (
+        currentStreak.current > 0 &&
+        !previousCompleted &&
+        !previousProtected &&
+        currentStreak.lastCompletedDate !== today
+      ) {
+        nextStreak = {
+          ...currentStreak,
+          current: 0,
+        };
+      }
+
+      /*
+        Concede o Save Point semanal
+        uma única vez.
+      */
+      const currentWeek =
+        getWeekKey(today);
+
+      if (
+        nextStreak.lastSavePointWeek !==
+        currentWeek
+      ) {
+        nextStreak = {
+          ...nextStreak,
+
+          savePoints: Math.min(
+            MAX_SAVE_POINTS,
+            nextStreak.savePoints + 1
+          ),
+
+          lastSavePointWeek:
+            currentWeek,
+        };
+      }
+
+      return {
+        ...current,
+
+        tasks:
+          refreshTasksForDate(
+            current.tasks,
+            today
+          ),
+
+        streak:
+          nextStreak,
+      };
+    });
   }, [today, loaded]);
 
   async function loadState() {
@@ -374,14 +548,21 @@ function App() {
 
       setState({
         ...initialState,
+
         ...parsed,
+
+        streak:
+          normalizeStreak(
+            parsed.streak
+          ),
 
         player: {
           ...initialState.player,
           ...(parsed.player || {}),
         },
 
-        tasks: updatedTasks,
+        tasks:
+          updatedTasks,
       });
     } catch (error) {
       console.log(
@@ -459,7 +640,8 @@ function App() {
 
   const dailyTargetProgress =
     Math.min(
-      completedXP / 30,
+      completedXP /
+        DAILY_TARGET_XP,
       1
     );
 
@@ -467,6 +649,25 @@ function App() {
     calculateLevel(
       state.player.xp
     );
+
+  const streakInfo =
+    normalizeStreak(
+      state.streak
+    );
+
+  const streakAtRisk =
+    streakRiskVisible &&
+    completedXP <
+      DAILY_TARGET_XP &&
+    streakInfo.current > 0 &&
+    streakInfo.savePoints > 0 &&
+    !streakInfo.protectedDates.includes(
+      today
+    );
+
+  const todayCompleted =
+    completedXP >=
+    DAILY_TARGET_XP;
 
   function openCreateTask() {
     setEditingTask(null);
@@ -1123,514 +1324,118 @@ function App() {
   }
 
   return (
-    <SafeAreaView
-      style={styles.safeArea}
-    >
-      <StatusBar
-        barStyle="light-content"
-        backgroundColor="#070811"
-      />
-
-      <View
-        style={styles.container}
+    <>
+      <SafeAreaView
+        style={styles.safeArea}
       >
-        <ScrollView
-          showsVerticalScrollIndicator={
-            false
-          }
-          contentContainerStyle={
-            styles.scrollContent
-          }
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#070811"
+        />
+
+        <View
+          style={styles.container}
         >
-          {/* ======================================
-              HEADER
-          ====================================== */}
-
-          <View
-            style={styles.header}
-          >
-            <View
-              style={
-                styles.profileArea
-              }
-            >
-              <Pressable
-                onPress={() =>
-                  Alert.alert(
-                    "Personagem",
-                    "A edição do personagem será adicionada no próximo bloco."
-                  )
-                }
-              >
-                <View
-                  style={
-                    styles.avatarFrame
-                  }
-                >
-                  <Image
-                    source={avatar}
-                    style={
-                      styles.avatar
-                    }
-                  />
-                </View>
-              </Pressable>
-
-              <View>
-                <Text
-                  style={
-                    styles.greeting
-                  }
-                >
-                  BEM-VINDO DE VOLTA
-                </Text>
-
-                <Text
-                  style={
-                    styles.playerName
-                  }
-                >
-                  {
-                    state.player
-                      .name
-                  }
-                </Text>
-              </View>
-            </View>
-
-            <View
-              style={
-                styles.coinHeader
-              }
-            >
-              <Ionicons
-                name="ellipse"
-                size={12}
-                color="#F2C94C"
-              />
-
-              <Text
-                style={
-                  styles.coinHeaderText
-                }
-              >
-                {
-                  state.player
-                    .coins
-                }
-              </Text>
-            </View>
-          </View>
-
-          {/* ======================================
-              PROGRESSÃO
-          ====================================== */}
-
-          <View
-            style={
-              styles.progressCard
+          <ScrollView
+            showsVerticalScrollIndicator={
+              false
+            }
+            contentContainerStyle={
+              styles.scrollContent
             }
           >
+            {/* ======================================
+                HEADER
+            ====================================== */}
+
             <View
-              style={
-                styles.progressTop
-              }
+              style={styles.header}
             >
-              <View>
-                <Text
-                  style={
-                    styles.sectionEyebrow
-                  }
-                >
-                  PROGRESSÃO
-                </Text>
-
-                <Text
-                  style={
-                    styles.levelText
-                  }
-                >
-                  Nível{" "}
-                  {levelInfo.level}
-                </Text>
-              </View>
-
-              <Text
+              <View
                 style={
-                  styles.xpText
+                  styles.profileArea
                 }
               >
-                {
-                  levelInfo.currentXP
-                }{" "}
-                /{" "}
-                {
-                  levelInfo.requiredXP
-                }{" "}
-                XP
-              </Text>
-            </View>
-
-            <View
-              style={styles.xpBar}
-            >
-              <View
-                style={[
-                  styles.xpFill,
-                  {
-                    width: `${
-                      (levelInfo.currentXP /
-                        levelInfo.requiredXP) *
-                      100
-                    }%`,
-                  },
-                ]}
-              />
-            </View>
-          </View>
-
-          {/* ======================================
-              META DIÁRIA
-          ====================================== */}
-
-          <View
-            style={styles.dailyCard}
-          >
-            <View
-              style={
-                styles.dailyHeader
-              }
-            >
-              <View>
-                <Text
-                  style={
-                    styles.sectionEyebrow
+                <Pressable
+                  onPress={() =>
+                    Alert.alert(
+                      "Personagem",
+                      "A edição do personagem será adicionada no próximo bloco."
+                    )
                   }
                 >
-                  META DE HOJE
-                </Text>
-
-                <Text
-                  style={
-                    styles.dailyXP
-                  }
-                >
-                  {completedXP}{" "}
-                  <Text
+                  <View
                     style={
-                      styles.dailyXPDim
+                      styles.avatarFrame
                     }
                   >
-                    / 30 XP
+                    <Image
+                      source={avatar}
+                      style={
+                        styles.avatar
+                      }
+                    />
+                  </View>
+                </Pressable>
+
+                <View>
+                  <Text
+                    style={
+                      styles.greeting
+                    }
+                  >
+                    BEM-VINDO DE VOLTA
                   </Text>
-                </Text>
+
+                  <Text
+                    style={
+                      styles.playerName
+                    }
+                  >
+                    {
+                      state.player
+                        .name
+                    }
+                  </Text>
+                </View>
               </View>
 
               <View
-                style={[
-                  styles.targetStatus,
-
-                  completedXP >= 30 &&
-                    styles.targetStatusComplete,
-                ]}
+                style={
+                  styles.coinHeader
+                }
               >
                 <Ionicons
-                  name={
-                    completedXP >= 30
-                      ? "checkmark"
-                      : "flame"
-                  }
-                  size={16}
-                  color="#FFFFFF"
+                  name="ellipse"
+                  size={12}
+                  color="#F2C94C"
                 />
 
                 <Text
                   style={
-                    styles.targetStatusText
+                    styles.coinHeaderText
                   }
                 >
-                  {completedXP >=
-                  30
-                    ? "CONCLUÍDA"
-                    : "EM PROGRESSO"}
+                  {
+                    state.player
+                      .coins
+                  }
                 </Text>
               </View>
             </View>
 
+            {/* ======================================
+                PROGRESSÃO
+            ====================================== */}
+
             <View
               style={
-                styles.dailyBar
-              }
-            >
-              <LinearGradient
-                colors={[
-                  "#6C4DFF",
-                  "#A875FF",
-                ]}
-                start={{
-                  x: 0,
-                  y: 0,
-                }}
-                end={{
-                  x: 1,
-                  y: 0,
-                }}
-                style={[
-                  styles.dailyFill,
-                  {
-                    width: `${
-                      dailyTargetProgress *
-                      100
-                    }%`,
-                  },
-                ]}
-              />
-            </View>
-
-            <Text
-              style={
-                styles.dailyHint
-              }
-            >
-              Complete tasks para
-              alcançar sua meta
-              diária.
-            </Text>
-          </View>
-
-          {/* ======================================
-              TASKS
-          ====================================== */}
-
-          <View
-            style={
-              styles.sectionHeader
-            }
-          >
-            <View>
-              <Text
-                style={
-                  styles.sectionEyebrow
-                }
-              >
-                HOJE
-              </Text>
-
-              <Text
-                style={
-                  styles.sectionTitle
-                }
-              >
-                Suas tasks
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={
-                openCreateTask
-              }
-              style={
-                styles.addButton
-              }
-            >
-              <Ionicons
-                name="add"
-                size={22}
-                color="#FFFFFF"
-              />
-            </Pressable>
-          </View>
-
-          {todayTasks.length ===
-          0 ? (
-            <View
-              style={
-                styles.emptyCard
-              }
-            >
-              <MaterialCommunityIcons
-                name="sword-cross"
-                size={32}
-                color="#7162B7"
-              />
-
-              <Text
-                style={
-                  styles.emptyTitle
-                }
-              >
-                Nenhuma task por
-                aqui
-              </Text>
-
-              <Text
-                style={
-                  styles.emptyText
-                }
-              >
-                Crie sua primeira
-                task e comece sua
-                ascensão.
-              </Text>
-
-              <Pressable
-                onPress={
-                  openCreateTask
-                }
-                style={
-                  styles.emptyButton
-                }
-              >
-                <Text
-                  style={
-                    styles.emptyButtonText
-                  }
-                >
-                  CRIAR TASK
-                </Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View
-              style={
-                styles.taskList
-              }
-            >
-              {todayTasks.map(
-                renderTask
-              )}
-            </View>
-          )}
-
-          <View
-            style={styles.infoBox}
-          >
-            <Ionicons
-              name="information-circle-outline"
-              size={19}
-              color="#8175B5"
-            />
-
-            <Text
-              style={styles.infoText}
-            >
-              Toque numa task para
-              concluí-la ou desfazê-la.
-              Segure ou use o lápis
-              para editar.
-            </Text>
-          </View>
-        </ScrollView>
-
-        {/* ======================================
-            BOTTOM NAV
-        ====================================== */}
-
-        <View
-          style={styles.bottomNav}
-        >
-          <NavItem
-            icon="home"
-            label="HOJE"
-            active
-          />
-
-          <NavItem
-            icon="flame-outline"
-            label="STREAK"
-            onPress={() =>
-              Alert.alert(
-                "Streak",
-                "O sistema de streak será ativado no próximo bloco."
-              )
-            }
-          />
-
-          <NavItem
-            icon="person-outline"
-            label="PERSONAGEM"
-            onPress={() =>
-              Alert.alert(
-                "Personagem",
-                "A tela de personagem será ativada no próximo bloco."
-              )
-            }
-          />
-
-          <NavItem
-            icon="skull-outline"
-            label="BOSSES"
-            onPress={() =>
-              Alert.alert(
-                "Bosses",
-                "O sistema de bosses será ativado no próximo bloco."
-              )
-            }
-          />
-
-          <NavItem
-            icon="storefront-outline"
-            label="LOJA"
-            onPress={() =>
-              Alert.alert(
-                "Loja",
-                "A Loja será ativada no próximo bloco."
-              )
-            }
-          />
-        </View>
-      </View>
-
-      {/* ========================================
-          MODAL DE TASK
-      ======================================== */}
-
-      <Modal
-        visible={
-          taskModalVisible
-        }
-        transparent
-        animationType="fade"
-        onRequestClose={
-          closeTaskModal
-        }
-      >
-        <KeyboardAvoidingView
-          style={
-            styles.modalBackdrop
-          }
-          behavior={
-            Platform.OS === "ios"
-              ? "padding"
-              : undefined
-          }
-        >
-          <Pressable
-            style={
-              styles.modalDismissArea
-            }
-            onPress={
-              closeTaskModal
-            }
-          />
-
-          <View
-            style={
-              styles.taskModal
-            }
-          >
-            <ScrollView
-              showsVerticalScrollIndicator={
-                false
-              }
-              keyboardShouldPersistTaps="handled"
-              contentContainerStyle={
-                styles.modalScrollContent
+                styles.progressCard
               }
             >
               <View
                 style={
-                  styles.modalHeader
+                  styles.progressTop
                 }
               >
                 <View>
@@ -1639,294 +1444,130 @@ function App() {
                       styles.sectionEyebrow
                     }
                   >
-                    {editingTask
-                      ? "EDITAR"
-                      : "NOVA"}
+                    PROGRESSÃO
                   </Text>
 
                   <Text
                     style={
-                      styles.modalTitle
+                      styles.levelText
                     }
                   >
-                    {editingTask
-                      ? "Editar task"
-                      : "Criar task"}
+                    Nível{" "}
+                    {levelInfo.level}
                   </Text>
                 </View>
 
-                <Pressable
-                  onPress={
-                    closeTaskModal
-                  }
+                <Text
                   style={
-                    styles.modalClose
+                    styles.xpText
                   }
                 >
-                  <Ionicons
-                    name="close"
-                    size={22}
-                    color="#AAA7BA"
-                  />
-                </Pressable>
+                  {
+                    levelInfo.currentXP
+                  }{" "}
+                  /{" "}
+                  {
+                    levelInfo.requiredXP
+                  }{" "}
+                  XP
+                </Text>
               </View>
-
-              {/* NOME */}
-
-              <Text
-                style={
-                  styles.inputLabel
-                }
-              >
-                NOME DA TASK
-              </Text>
-
-              <TextInput
-                value={
-                  taskTitle
-                }
-                onChangeText={
-                  setTaskTitle
-                }
-                placeholder="Ex.: Treinar 30 minutos"
-                placeholderTextColor="#666477"
-                style={
-                  styles.textInput
-                }
-                autoFocus
-                maxLength={70}
-              />
-
-              {/* TIPO */}
-
-              <Text
-                style={
-                  styles.inputLabel
-                }
-              >
-                TIPO
-              </Text>
 
               <View
-                style={
-                  styles.optionRow
-                }
+                style={styles.xpBar}
               >
-                <OptionButton
-                  label="DIÁRIA"
-                  active={
-                    taskType ===
-                    "daily"
-                  }
-                  onPress={() =>
-                    setTaskType(
-                      "daily"
-                    )
-                  }
-                />
-
-                <OptionButton
-                  label="ESPECIAL"
-                  active={
-                    taskType ===
-                    "special"
-                  }
-                  onPress={() =>
-                    setTaskType(
-                      "special"
-                    )
-                  }
+                <View
+                  style={[
+                    styles.xpFill,
+                    {
+                      width: `${
+                        (levelInfo.currentXP /
+                          levelInfo.requiredXP) *
+                        100
+                      }%`,
+                    },
+                  ]}
                 />
               </View>
+            </View>
 
-              {/* DIAS DA SEMANA */}
+            {/* ======================================
+                META DIÁRIA
+            ====================================== */}
 
-              {taskType ===
-                "daily" && (
-                <>
-                  <View
+            <View
+              style={styles.dailyCard}
+            >
+              <View
+                style={
+                  styles.dailyHeader
+                }
+              >
+                <View>
+                  <Text
                     style={
-                      styles.daysHeader
+                      styles.sectionEyebrow
                     }
                   >
-                    <Text
-                      style={
-                        styles.inputLabel
-                      }
-                    >
-                      DIAS DA SEMANA
-                    </Text>
-
-                    <Pressable
-                      onPress={
-                        selectAllDays
-                      }
-                      hitSlop={8}
-                    >
-                      <Text
-                        style={
-                          styles.selectAllText
-                        }
-                      >
-                        TODOS
-                      </Text>
-                    </Pressable>
-                  </View>
-
-                  <View
-                    style={
-                      styles.weekDaysGrid
-                    }
-                  >
-                    {WEEK_DAYS.map(
-                      (day) => {
-                        const active =
-                          selectedDays.includes(
-                            day.value
-                          );
-
-                        return (
-                          <Pressable
-                            key={
-                              day.value
-                            }
-                            onPress={() =>
-                              toggleWeekDay(
-                                day.value
-                              )
-                            }
-                            style={[
-                              styles.weekDayButton,
-
-                              active &&
-                                styles.weekDayButtonActive,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.weekDayText,
-
-                                active &&
-                                  styles.weekDayTextActive,
-                              ]}
-                            >
-                              {
-                                day.short
-                              }
-                            </Text>
-                          </Pressable>
-                        );
-                      }
-                    )}
-                  </View>
+                    META DE HOJE
+                  </Text>
 
                   <Text
                     style={
-                      styles.daysHint
+                      styles.dailyXP
                     }
                   >
-                    A task aparecerá
-                    somente nos dias
-                    selecionados.
+                    {completedXP}{" "}
+                    <Text
+                      style={
+                        styles.dailyXPDim
+                      }
+                    >
+                      / 30 XP
+                    </Text>
                   </Text>
-                </>
-              )}
+                </View>
 
-              {/* DIFICULDADE */}
+                <View
+                  style={[
+                    styles.targetStatus,
 
-              <Text
-                style={
-                  styles.inputLabel
-                }
-              >
-                DIFICULDADE
-              </Text>
+                    completedXP >= DAILY_TARGET_XP &&
+                      styles.targetStatusComplete,
+                  ]}
+                >
+                  <Ionicons
+                    name={
+                      completedXP >= DAILY_TARGET_XP
+                        ? "checkmark"
+                        : "flame"
+                    }
+                    size={16}
+                    color="#FFFFFF"
+                  />
+
+                  <Text
+                    style={
+                      styles.targetStatusText
+                    }
+                  >
+                    {completedXP >=
+                    30
+                      ? "CONCLUÍDA"
+                      : "EM PROGRESSO"}
+                  </Text>
+                </View>
+              </View>
 
               <View
                 style={
-                  styles.difficultyGrid
-                }
-              >
-                {Object.entries(
-                  DIFFICULTIES
-                ).map(
-                  ([
-                    key,
-                    value,
-                  ]) => (
-                    <Pressable
-                      key={key}
-                      onPress={() =>
-                        setDifficulty(
-                          key
-                        )
-                      }
-                      style={[
-                        styles.difficultyButton,
-
-                        difficulty ===
-                          key &&
-                          styles.difficultyButtonActive,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.difficultyName,
-
-                          difficulty ===
-                            key &&
-                            styles.difficultyNameActive,
-                        ]}
-                      >
-                        {
-                          value.label
-                        }
-                      </Text>
-
-                      <Text
-                        style={[
-                          styles.difficultyReward,
-
-                          difficulty ===
-                            key &&
-                            styles.difficultyRewardActive,
-                        ]}
-                      >
-                        +{value.xp} XP •{" "}
-                        {
-                          value.coins
-                        }{" "}
-                        🪙
-                      </Text>
-                    </Pressable>
-                  )
-                )}
-              </View>
-
-              <Text
-                style={
-                  styles.systemNote
-                }
-              >
-                O sistema define
-                automaticamente a
-                recompensa.
-              </Text>
-
-              {/* SALVAR */}
-
-              <Pressable
-                onPress={
-                  saveTask
-                }
-                style={
-                  styles.saveButton
+                  styles.dailyBar
                 }
               >
                 <LinearGradient
                   colors={[
-                    "#6548F5",
-                    "#8B63FF",
+                    "#6C4DFF",
+                    "#A875FF",
                   ]}
                   start={{
                     x: 0,
@@ -1936,26 +1577,587 @@ function App() {
                     x: 1,
                     y: 0,
                   }}
+                  style={[
+                    styles.dailyFill,
+                    {
+                      width: `${
+                        dailyTargetProgress *
+                        100
+                      }%`,
+                    },
+                  ]}
+                />
+              </View>
+
+              <Text
+                style={
+                  styles.dailyHint
+                }
+              >
+                Complete tasks para
+                alcançar sua meta
+                diária.
+              </Text>
+            </View>
+
+            {/* ======================================
+                TASKS
+            ====================================== */}
+
+            <View
+              style={
+                styles.sectionHeader
+              }
+            >
+              <View>
+                <Text
                   style={
-                    styles.saveButtonGradient
+                    styles.sectionEyebrow
+                  }
+                >
+                  HOJE
+                </Text>
+
+                <Text
+                  style={
+                    styles.sectionTitle
+                  }
+                >
+                  Suas tasks
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={
+                  openCreateTask
+                }
+                style={
+                  styles.addButton
+                }
+              >
+                <Ionicons
+                  name="add"
+                  size={22}
+                  color="#FFFFFF"
+                />
+              </Pressable>
+            </View>
+
+            {todayTasks.length ===
+            0 ? (
+              <View
+                style={
+                  styles.emptyCard
+                }
+              >
+                <MaterialCommunityIcons
+                  name="sword-cross"
+                  size={32}
+                  color="#7162B7"
+                />
+
+                <Text
+                  style={
+                    styles.emptyTitle
+                  }
+                >
+                  Nenhuma task por
+                  aqui
+                </Text>
+
+                <Text
+                  style={
+                    styles.emptyText
+                  }
+                >
+                  Crie sua primeira
+                  task e comece sua
+                  ascensão.
+                </Text>
+
+                <Pressable
+                  onPress={
+                    openCreateTask
+                  }
+                  style={
+                    styles.emptyButton
                   }
                 >
                   <Text
                     style={
-                      styles.saveButtonText
+                      styles.emptyButtonText
                     }
                   >
-                    {editingTask
-                      ? "SALVAR ALTERAÇÕES"
-                      : "CRIAR TASK"}
+                    CRIAR TASK
                   </Text>
-                </LinearGradient>
-              </Pressable>
-            </ScrollView>
+                </Pressable>
+              </View>
+            ) : (
+              <View
+                style={
+                  styles.taskList
+                }
+              >
+                {todayTasks.map(
+                  renderTask
+                )}
+              </View>
+            )}
+
+            <View
+              style={styles.infoBox}
+            >
+              <Ionicons
+                name="information-circle-outline"
+                size={19}
+                color="#8175B5"
+              />
+
+              <Text
+                style={styles.infoText}
+              >
+                Toque numa task para
+                concluí-la ou desfazê-la.
+                Segure ou use o lápis
+                para editar.
+              </Text>
+            </View>
+          </ScrollView>
+
+          {/* ======================================
+              BOTTOM NAV
+          ====================================== */}
+
+          <View
+            style={styles.bottomNav}
+          >
+            <NavItem
+              icon="home"
+              label="HOJE"
+              active
+            />
+
+            <NavItem
+              icon="flame-outline"
+              label="STREAK"
+              onPress={
+                openStreakScreen
+              }
+            />
+
+            <NavItem
+              icon="person-outline"
+              label="PERSONAGEM"
+              onPress={() =>
+                Alert.alert(
+                  "Personagem",
+                  "A tela de personagem será ativada no próximo bloco."
+                )
+              }
+            />
+
+            <NavItem
+              icon="skull-outline"
+              label="BOSSES"
+              onPress={() =>
+                Alert.alert(
+                  "Bosses",
+                  "O sistema de bosses será ativado no próximo bloco."
+                )
+              }
+            />
+
+            <NavItem
+              icon="storefront-outline"
+              label="LOJA"
+              onPress={() =>
+                Alert.alert(
+                  "Loja",
+                  "A Loja será ativada no próximo bloco."
+                )
+              }
+            />
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
-    </SafeAreaView>
+        </View>
+
+        {/* ========================================
+            MODAL DE TASK
+        ======================================== */}
+
+        <Modal
+          visible={
+            taskModalVisible
+          }
+          transparent
+          animationType="fade"
+          onRequestClose={
+            closeTaskModal
+          }
+        >
+          <KeyboardAvoidingView
+            style={
+              styles.modalBackdrop
+            }
+            behavior={
+              Platform.OS === "ios"
+                ? "padding"
+                : undefined
+            }
+          >
+            <Pressable
+              style={
+                styles.modalDismissArea
+              }
+              onPress={
+                closeTaskModal
+              }
+            />
+
+            <View
+              style={
+                styles.taskModal
+              }
+            >
+              <ScrollView
+                showsVerticalScrollIndicator={
+                  false
+                }
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={
+                  styles.modalScrollContent
+                }
+              >
+                <View
+                  style={
+                    styles.modalHeader
+                  }
+                >
+                  <View>
+                    <Text
+                      style={
+                        styles.sectionEyebrow
+                      }
+                    >
+                      {editingTask
+                        ? "EDITAR"
+                        : "NOVA"}
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.modalTitle
+                      }
+                    >
+                      {editingTask
+                        ? "Editar task"
+                        : "Criar task"}
+                    </Text>
+                  </View>
+
+                  <Pressable
+                    onPress={
+                      closeTaskModal
+                    }
+                    style={
+                      styles.modalClose
+                    }
+                  >
+                    <Ionicons
+                      name="close"
+                      size={22}
+                      color="#AAA7BA"
+                    />
+                  </Pressable>
+                </View>
+
+                {/* NOME */}
+
+                <Text
+                  style={
+                    styles.inputLabel
+                  }
+                >
+                  NOME DA TASK
+                </Text>
+
+                <TextInput
+                  value={
+                    taskTitle
+                  }
+                  onChangeText={
+                    setTaskTitle
+                  }
+                  placeholder="Ex.: Treinar 30 minutos"
+                  placeholderTextColor="#666477"
+                  style={
+                    styles.textInput
+                  }
+                  autoFocus
+                  maxLength={70}
+                />
+
+                {/* TIPO */}
+
+                <Text
+                  style={
+                    styles.inputLabel
+                  }
+                >
+                  TIPO
+                </Text>
+
+                <View
+                  style={
+                    styles.optionRow
+                  }
+                >
+                  <OptionButton
+                    label="DIÁRIA"
+                    active={
+                      taskType ===
+                      "daily"
+                    }
+                    onPress={() =>
+                      setTaskType(
+                        "daily"
+                      )
+                    }
+                  />
+
+                  <OptionButton
+                    label="ESPECIAL"
+                    active={
+                      taskType ===
+                      "special"
+                    }
+                    onPress={() =>
+                      setTaskType(
+                        "special"
+                      )
+                    }
+                  />
+                </View>
+
+                {/* DIAS DA SEMANA */}
+
+                {taskType ===
+                  "daily" && (
+                  <>
+                    <View
+                      style={
+                        styles.daysHeader
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.inputLabel
+                        }
+                      >
+                        DIAS DA SEMANA
+                      </Text>
+
+                      <Pressable
+                        onPress={
+                          selectAllDays
+                        }
+                        hitSlop={8}
+                      >
+                        <Text
+                          style={
+                            styles.selectAllText
+                          }
+                        >
+                          TODOS
+                        </Text>
+                      </Pressable>
+                    </View>
+
+                    <View
+                      style={
+                        styles.weekDaysGrid
+                      }
+                    >
+                      {WEEK_DAYS.map(
+                        (day) => {
+                          const active =
+                            selectedDays.includes(
+                              day.value
+                            );
+
+                          return (
+                            <Pressable
+                              key={
+                                day.value
+                              }
+                              onPress={() =>
+                                toggleWeekDay(
+                                  day.value
+                                )
+                              }
+                              style={[
+                                styles.weekDayButton,
+
+                                active &&
+                                  styles.weekDayButtonActive,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.weekDayText,
+
+                                  active &&
+                                    styles.weekDayTextActive,
+                                ]}
+                              >
+                                {
+                                  day.short
+                                }
+                              </Text>
+                            </Pressable>
+                          );
+                        }
+                      )}
+                    </View>
+
+                    <Text
+                      style={
+                        styles.daysHint
+                      }
+                    >
+                      A task aparecerá
+                      somente nos dias
+                      selecionados.
+                    </Text>
+                  </>
+                )}
+
+                {/* DIFICULDADE */}
+
+                <Text
+                  style={
+                    styles.inputLabel
+                  }
+                >
+                  DIFICULDADE
+                </Text>
+
+                <View
+                  style={
+                    styles.difficultyGrid
+                  }
+                >
+                  {Object.entries(
+                    DIFFICULTIES
+                  ).map(
+                    ([
+                      key,
+                      value,
+                    ]) => (
+                      <Pressable
+                        key={key}
+                        onPress={() =>
+                          setDifficulty(
+                            key
+                          )
+                        }
+                        style={[
+                          styles.difficultyButton,
+
+                          difficulty ===
+                            key &&
+                            styles.difficultyButtonActive,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.difficultyName,
+
+                            difficulty ===
+                              key &&
+                              styles.difficultyNameActive,
+                          ]}
+                        >
+                          {
+                            value.label
+                          }
+                        </Text>
+
+                        <Text
+                          style={[
+                            styles.difficultyReward,
+
+                            difficulty ===
+                              key &&
+                              styles.difficultyRewardActive,
+                          ]}
+                        >
+                          +{value.xp} XP •{" "}
+                          {
+                            value.coins
+                          }{" "}
+                          🪙
+                        </Text>
+                      </Pressable>
+                    )
+                  )}
+                </View>
+
+                <Text
+                  style={
+                    styles.systemNote
+                  }
+                >
+                  O sistema define
+                  automaticamente a
+                  recompensa.
+                </Text>
+
+                {/* SALVAR */}
+
+                <Pressable
+                  onPress={
+                    saveTask
+                  }
+                  style={
+                    styles.saveButton
+                  }
+                >
+                  <LinearGradient
+                    colors={[
+                      "#6548F5",
+                      "#8B63FF",
+                    ]}
+                    start={{
+                      x: 0,
+                      y: 0,
+                    }}
+                    end={{
+                      x: 1,
+                      y: 0,
+                    }}
+                    style={
+                      styles.saveButtonGradient
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.saveButtonText
+                      }
+                    >
+                      {editingTask
+                        ? "SALVAR ALTERAÇÕES"
+                        : "CRIAR TASK"}
+                    </Text>
+                  </LinearGradient>
+                </Pressable>
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </SafeAreaView>
+
+      {renderStreakScreen()}
+    </>
   );
 }
 
@@ -2014,6 +2216,252 @@ function OptionButton({
           styles.optionButtonText,
           active &&
             styles.optionButtonTextActive,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+  if (!loaded) {
+    return (
+      <View style={styles.loadingScreen}>
+        <ActivityIndicator
+          size="large"
+          color="#9876FF"
+        />
+
+        <Text style={styles.loadingText}>
+          Carregando Ascensão...
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <>
+      <SafeAreaView style={styles.safeArea}>
+        <StatusBar
+          barStyle="light-content"
+          backgroundColor="#0B0B12"
+        />
+
+        <View style={styles.container}>
+          <View style={styles.header}>
+            <View>
+              <Text style={styles.headerEyebrow}>
+                ASCENSÃO
+              </Text>
+
+              <Text style={styles.headerTitle}>
+                Hoje
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={openCharacterModal}
+              style={styles.avatarButton}
+            >
+              <Image
+                source={require("./assets/avatar-neroth.png")}
+                style={styles.avatar}
+              />
+            </Pressable>
+          </View>
+
+          <View style={styles.progressCard}>
+            <View style={styles.progressTopRow}>
+              <View>
+                <Text style={styles.progressLabel}>
+                  PROGRESSO DIÁRIO
+                </Text>
+
+                <Text style={styles.progressValue}>
+                  {completedXP} / {DAILY_TARGET_XP} XP
+                </Text>
+              </View>
+
+              <Text style={styles.progressPercent}>
+                {dailyTargetProgress}%
+              </Text>
+            </View>
+
+            <View style={styles.progressBar}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${dailyTargetProgress}%`,
+                  },
+                ]}
+              />
+            </View>
+
+            <View style={styles.progressBottomRow}>
+              <Text style={styles.progressHint}>
+                {todayCompleted
+                  ? "Meta de hoje concluída."
+                  : `Faltam ${Math.max(
+                      0,
+                      DAILY_TARGET_XP - completedXP
+                    )} XP para concluir.`}
+              </Text>
+
+              <Text style={styles.levelText}>
+                Nível {levelInfo.level}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.sectionHeader}>
+            <View>
+              <Text style={styles.sectionEyebrow}>
+                MISSÕES
+              </Text>
+
+              <Text style={styles.sectionTitle}>
+                Tarefas de hoje
+              </Text>
+            </View>
+
+            <Pressable
+              onPress={openCreateTaskModal}
+              style={styles.addTaskButton}
+            >
+              <Ionicons
+                name="add"
+                size={22}
+                color="#FFFFFF"
+              />
+            </Pressable>
+          </View>
+
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.taskList}
+          >
+            {todayTasks.length === 0 ? (
+              <View style={styles.emptyState}>
+                <Ionicons
+                  name="sparkles-outline"
+                  size={30}
+                  color="#6E6684"
+                />
+
+                <Text style={styles.emptyTitle}>
+                  Nenhuma tarefa por aqui
+                </Text>
+
+                <Text style={styles.emptyText}>
+                  Crie uma missão para começar sua ascensão.
+                </Text>
+
+                <Pressable
+                  onPress={openCreateTaskModal}
+                  style={styles.emptyButton}
+                >
+                  <Text style={styles.emptyButtonText}>
+                    CRIAR TAREFA
+                  </Text>
+                </Pressable>
+              </View>
+            ) : (
+              todayTasks.map(renderTask)
+            )}
+
+            <View style={{ height: 110 }} />
+          </ScrollView>
+        </View>
+
+        <View style={styles.bottomNav}>
+          <NavItem
+            icon="today-outline"
+            label="Hoje"
+            active
+            onPress={() => {}}
+          />
+
+          <NavItem
+            icon="flame-outline"
+            label="Streak"
+            onPress={openStreakScreen}
+          />
+
+          <NavItem
+            icon="person-outline"
+            label="Personagem"
+            onPress={openCharacterModal}
+          />
+
+          <NavItem
+            icon="skull-outline"
+            label="Bosses"
+            onPress={openBossesModal}
+          />
+
+          <NavItem
+            icon="bag-handle-outline"
+            label="Loja"
+            onPress={openShopModal}
+          />
+        </View>
+
+        {renderTaskModal()}
+      </SafeAreaView>
+
+      {renderStreakScreen()}
+    </>
+  );
+                           }
+
+function NavItem({
+  icon,
+  label,
+  active,
+  onPress,
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={styles.navItem}
+    >
+      <Ionicons
+        name={icon}
+        size={21}
+        color={active ? "#A875FF" : "#696576"}
+      />
+
+      <Text
+        style={[
+          styles.navLabel,
+          active && styles.navLabelActive,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function OptionButton({
+  label,
+  selected,
+  onPress,
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={[
+        styles.optionButton,
+        selected && styles.optionButtonSelected,
+      ]}
+    >
+      <Text
+        style={[
+          styles.optionButtonText,
+          selected &&
+            styles.optionButtonTextSelected,
         ]}
       >
         {label}
@@ -2280,7 +2728,7 @@ const styles = StyleSheet.create({
     opacity: 0.75,
   },
 
-  taskCompleted: {
+    taskCompleted: {
     opacity: 0.48,
     borderColor: "#282837",
   },
@@ -2473,241 +2921,278 @@ const styles = StyleSheet.create({
     color: "#9876FF",
   },
 
-  // ==========================================
-  // MODAL
-  // ==========================================
-
-  modalBackdrop: {
+  streakScreenBackdrop: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.72)",
-    justifyContent: "flex-end",
+    backgroundColor: "rgba(0,0,0,0.78)",
+    justifyContent: "center",
+    paddingHorizontal: 18,
   },
 
-  modalDismissArea: {
-    flex: 1,
-  },
-
-  taskModal: {
+  streakScreen: {
     backgroundColor: "#11121D",
-    borderTopLeftRadius: 25,
-    borderTopRightRadius: 25,
     borderWidth: 1,
-    borderBottomWidth: 0,
-    borderColor: "#29283A",
-    maxHeight: "90%",
+    borderColor: "#302B49",
+    borderRadius: 24,
+    padding: 20,
+    maxHeight: "88%",
   },
 
-  modalScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 30,
-  },
-
-  modalHeader: {
+  streakScreenHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 16,
+  },
+
+  streakScreenTitle: {
+    color: "#F2EFF8",
+    fontSize: 25,
+    fontWeight: "700",
+    marginTop: 3,
+  },
+
+  streakHero: {
+    alignItems: "center",
+    backgroundColor: "#171525",
+    borderWidth: 1,
+    borderColor: "#302A4A",
+    borderRadius: 18,
+    paddingVertical: 20,
+    marginBottom: 12,
+  },
+
+  streakCurrentNumber: {
+    color: "#F2EFF8",
+    fontSize: 48,
+    fontWeight: "800",
+    marginTop: 2,
+  },
+
+  streakCurrentLabel: {
+    color: "#81799A",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 1.5,
+    marginTop: -2,
+  },
+
+  streakStatsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+
+  streakStatCard: {
+    flex: 1,
+    backgroundColor: "#0D0E17",
+    borderWidth: 1,
+    borderColor: "#242438",
+    borderRadius: 14,
+    alignItems: "center",
+    paddingVertical: 13,
+  },
+
+  streakStatValue: {
+    color: "#B39AFF",
+    fontSize: 23,
+    fontWeight: "800",
+  },
+
+  streakStatLabel: {
+    color: "#696576",
+    fontSize: 8,
+    fontWeight: "800",
+    letterSpacing: 0.6,
+    marginTop: 3,
+  },
+
+  streakRuleCard: {
+    backgroundColor: "#0D0E17",
+    borderWidth: 1,
+    borderColor: "#242438",
+    borderRadius: 14,
+    padding: 13,
+    marginBottom: 10,
+  },
+
+  streakRuleHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+
+  streakRuleTitle: {
+    color: "#D9D3E8",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginLeft: 7,
+  },
+
+  streakRuleText: {
+    color: "#777383",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+
+  streakRiskCard: {
+    backgroundColor: "#211A18",
+    borderWidth: 1,
+    borderColor: "#55402F",
+    borderRadius: 14,
+    padding: 13,
+    marginBottom: 10,
+  },
+
+  streakRiskTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  streakRiskTitle: {
+    color: "#E7B76C",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    marginLeft: 7,
+  },
+
+  streakRiskText: {
+    color: "#A18C76",
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 7,
+    marginBottom: 11,
+  },
+
+  savePointButton: {
+    height: 43,
+    borderRadius: 11,
+    backgroundColor: "#5F45CF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  savePointButtonText: {
+    color: "#FFFFFF",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+    marginLeft: 7,
+  },
+
+  streakProtectedCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#16231D",
+    borderWidth: 1,
+    borderColor: "#2D5140",
+    borderRadius: 14,
+    padding: 13,
+    marginBottom: 10,
+  },
+
+  streakProtectedTitle: {
+    color: "#8FD3A8",
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 0.7,
+  },
+
+  streakProtectedText: {
+    color: "#759581",
+    fontSize: 9,
+    marginTop: 3,
+  },
+
+  streakFooterInfo: {
+    paddingTop: 5,
+  },
+
+  streakFooterText: {
+    color: "#5F5B6A",
+    fontSize: 9,
+    marginTop: 4,
+  },    
+
+    modalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#191A27",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "flex-end",
+  },
+
+  modalContent: {
+    backgroundColor: "#11121D",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+    borderTopWidth: 1,
+    borderColor: "#302B49",
   },
 
   modalTitle: {
     color: "#F2EFF8",
-    fontSize: 23,
+    fontSize: 21,
     fontWeight: "700",
-    marginTop: 3,
+    marginBottom: 16,
   },
 
-  modalClose: {
-    width: 36,
-    height: 36,
-    borderRadius: 11,
-    backgroundColor: "#1B1C29",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  inputLabel: {
-    color: "#77719B",
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 1.4,
-    marginBottom: 8,
-    marginTop: 5,
-  },
-
-  textInput: {
-    height: 48,
-    backgroundColor: "#0B0C14",
+  input: {
+    backgroundColor: "#0D0E17",
     borderWidth: 1,
-    borderColor: "#292A39",
+    borderColor: "#29283A",
     borderRadius: 12,
-    color: "#E9E6F1",
+    color: "#F2EFF8",
     paddingHorizontal: 13,
+    paddingVertical: 12,
     fontSize: 13,
-    marginBottom: 17,
+    marginBottom: 12,
   },
 
-  optionRow: {
+  modalActions: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 17,
+    marginTop: 8,
   },
 
-  optionButton: {
+  modalButton: {
     flex: 1,
-    height: 42,
+    height: 44,
     borderRadius: 11,
-    backgroundColor: "#0B0C14",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  modalButtonPrimary: {
+    backgroundColor: "#6046CC",
+  },
+
+  modalButtonSecondary: {
+    backgroundColor: "#202131",
     borderWidth: 1,
-    borderColor: "#292A39",
-    alignItems: "center",
-    justifyContent: "center",
+    borderColor: "#303145",
   },
 
-  optionButtonActive: {
-    backgroundColor: "#2A2050",
-    borderColor: "#7655E8",
-  },
-
-  optionButtonText: {
-    color: "#777487",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-
-  optionButtonTextActive: {
-    color: "#B59EFF",
-  },
-
-  // ==========================================
-  // DIAS DA SEMANA
-  // ==========================================
-
-  daysHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 8,
-  },
-
-  selectAllText: {
-    color: "#9876FF",
-    fontSize: 9,
-    fontWeight: "800",
-    letterSpacing: 0.8,
-  },
-
-  weekDaysGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 6,
-  },
-
-  weekDayButton: {
-    width: 42,
-    height: 40,
-    borderRadius: 11,
-    backgroundColor: "#0B0C14",
-    borderWidth: 1,
-    borderColor: "#292A39",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  weekDayButtonActive: {
-    backgroundColor: "#2A2050",
-    borderColor: "#7655E8",
-  },
-
-  weekDayText: {
-    color: "#686577",
-    fontSize: 8,
-    fontWeight: "800",
-  },
-
-  weekDayTextActive: {
-    color: "#B59EFF",
-  },
-
-  daysHint: {
-    color: "#646171",
-    fontSize: 9,
-    marginBottom: 17,
-  },
-
-  // ==========================================
-  // DIFICULDADE
-  // ==========================================
-
-  difficultyGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 8,
-    marginBottom: 8,
-  },
-
-  difficultyButton: {
-    width: "48%",
-    minHeight: 53,
-    backgroundColor: "#0B0C14",
-    borderWidth: 1,
-    borderColor: "#292A39",
-    borderRadius: 11,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    justifyContent: "center",
-  },
-
-  difficultyButtonActive: {
-    backgroundColor: "#2A2050",
-    borderColor: "#7655E8",
-  },
-
-  difficultyName: {
-    color: "#858190",
-    fontSize: 10,
-    fontWeight: "700",
-  },
-
-  difficultyNameActive: {
-    color: "#E3DDF5",
-  },
-
-  difficultyReward: {
-    color: "#666273",
-    fontSize: 9,
-    marginTop: 3,
-  },
-
-  difficultyRewardActive: {
-    color: "#A88FFF",
-  },
-
-  systemNote: {
-    color: "#666273",
-    fontSize: 9,
-    lineHeight: 14,
-    marginTop: 4,
-    marginBottom: 17,
-  },
-
-  saveButton: {
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-
-  saveButtonGradient: {
-    height: 49,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  saveButtonText: {
+  modalButtonText: {
     color: "#FFFFFF",
     fontSize: 10,
     fontWeight: "800",
-    letterSpacing: 0.9,
+    letterSpacing: 0.7,
+  },
+
+  modalButtonTextSecondary: {
+    color: "#A8A3B4",
   },
 });
 
